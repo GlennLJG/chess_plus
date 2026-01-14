@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Plus - Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 20px; color: #ffd700; }
+        
+        #loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #loading.hidden { display: none; }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 5px solid #333;
+            border-top-color: #ffd700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #loading-text { margin-top: 20px; }
+        
+        #app { display: flex; gap: 30px; flex-wrap: wrap; justify-content: center; }
+        
+        /* Sélecteur de parties */
+        #selector {
+            background: #754840;
+            padding: 20px;
+            border-radius: 15px;
+            width: 450px;
+        }
+        #selector h2 { margin-bottom: 15px; }
+        #selector input {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        #selector button {
+            width: 100%;
+            padding: 12px;
+            background: #486ddb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        #selector button:hover { background: #5a7de8; }
+        #selector button:disabled { background: #666; cursor: wait; }
+        
+        #games-list {
+            max-height: 450px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .game-item {
+            background: rgba(255,255,255,0.1);
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .game-item:hover { background: rgba(255,255,255,0.2); }
+        .game-item .players { font-weight: bold; }
+        .game-item .details { font-size: 12px; color: #aaa; margin-top: 5px; }
+        
+        /* Viewer */
+        #viewer {
+            background: #754840;
+            padding: 20px;
+            border-radius: 15px;
+            display: none;
+            max-width: 600px;
+        }
+        #viewer.active { display: block; }
+        
+        #game-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        .player-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .color-square {
+            width: 20px; height: 20px;
+            border-radius: 4px;
+            border: 2px solid #999;
+        }
+        .color-square.white { background: white; }
+        .color-square.black { background: #333; }
+        
+        #board-container {
+            display: block;
+        }
+        #board-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        #chessboard {
+            display: grid;
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
+            border: 3px solid #333;
+            border-radius: 4px;
+        }
+        .square {
+            width: 60px; height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 45px;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .square.light { background: #dEc5a6; }
+        .square.dark { background: #486ddb; }
+        .square.selected { background: #7fff7f !important; }
+        .square.red-highlight { background: rgba(255, 0, 0, 0.5) !important; }
+        .square.legal-move::after {
+            content: '';
+            width: 15px; height: 15px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 50%;
+            position: absolute;
+        }
+        .square.legal-capture {
+            box-shadow: inset 0 0 0 4px rgba(255,0,0,0.5);
+        }
+        /* Couleurs des pièces */
+        .square.white-piece { color: #fff; text-shadow: 1px 1px 2px #000, -1px -1px 2px #000; }
+        .square.black-piece { color: #222; text-shadow: 1px 1px 1px #666; }
+        
+        /* Flèches SVG */
+        #arrows-svg {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .arrow-line {
+            stroke: #ffa500;
+            stroke-width: 8;
+            stroke-linecap: round;
+            fill: none;
+            opacity: 0.8;
+        }
+        .arrow-head {
+            fill: #ffa500;
+            opacity: 0.8;
+        }
+        
+        .captured-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 30px;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #captured-top-row {
+            margin-bottom: 8px;
+        }
+        #captured-bottom-row {
+            margin-top: 8px;
+        }
+        .captured-pieces { 
+            font-size: 20px; 
+            flex-grow: 1;
+        }
+        .captured-pieces .white-captured { 
+            color: #fff; 
+            text-shadow: 1px 1px 2px #000, -1px -1px 2px #000;
+        }
+        .captured-pieces .black-captured { 
+            color: #222; 
+            text-shadow: 1px 1px 1px #888;
+        }
+        .material-diff {
+            background: #7f7;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        #controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        #controls button {
+            padding: 8px 15px;
+            font-size: 14px;
+            background: #486ddb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        #controls button:hover { background: #5a7de8; }
+        #controls button:disabled { background: #666; cursor: not-allowed; }
+        #controls button.play-mode { background: #2a2; }
+        
+        #move-info {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
+        #back-btn {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: #555;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #back-btn:hover { background: #666; }
+        
+        /* Keyboard shortcuts hint */
+        #shortcuts {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #aaa;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <p id="loading-text">Chargement de Python...</p>
+    </div>
+    
+    <h1>♔ Chess Plus ♚</h1>
+    
+    <div id="app">
+        <!-- Sélecteur de parties -->
+        <div id="selector">
+            <h2>🔍 Rechercher des parties</h2>
+            <input type="text" id="username" placeholder="Nom d'utilisateur Chess.com">
+            <button id="search-btn">Rechercher</button>
+            <div id="games-list"></div>
+        </div>
+        
+        <!-- Viewer -->
+        <div id="viewer">
+            <div id="game-info">
+                <div class="player-info">
+                    <div class="color-square white"></div>
+                    <span id="white-player">Blancs</span>
+                </div>
+                <div id="result">-</div>
+                <div class="player-info">
+                    <span id="black-player">Noirs</span>
+                    <div class="color-square black"></div>
+                </div>
+            </div>
+            
+            <div id="board-container">
+                <!-- Captures du joueur du haut (adversaire) -->
+                <div id="captured-top-row" class="captured-row">
+                    <span id="captured-top" class="captured-pieces"></span>
+                    <span id="material-diff-top" class="material-diff" style="display:none;"></span>
+                </div>
+                
+                <div id="board-wrapper">
+                    <div id="chessboard"></div>
+                    <svg id="arrows-svg"></svg>
+                </div>
+                
+                <!-- Captures du joueur du bas (moi) -->
+                <div id="captured-bottom-row" class="captured-row">
+                    <span id="captured-bottom" class="captured-pieces"></span>
+                    <span id="material-diff-bottom" class="material-diff" style="display:none;"></span>
+                </div>
+            </div>
+            
+            <div id="controls">
+                <button id="btn-start" title="Début">|&lt;</button>
+                <button id="btn-prev" title="Coup précédent">&lt;</button>
+                <button id="btn-next" title="Coup suivant">&gt;</button>
+                <button id="btn-end" title="Fin">&gt;|</button>
+                <button id="btn-play" title="Mode jeu">Jouer</button>
+                <button id="btn-flip" title="Retourner l'échiquier">↻</button>
+            </div>
+            
+            <div id="move-info">Coup 0 / 0</div>
+            <div id="shortcuts">← → pour naviguer • Clic droit: flèches/cases rouges • C pour effacer</div>
+            
+            <button id="back-btn">← Retour aux parties</button>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <script>
+        // Helper: convertit boolean JS en Python
+        const pyBool = (b) => b ? 'True' : 'False';
+        
+        // Variables globales
+        let pyodide = null;
+        let chess = null;
+        let currentGame = null;
+        let moves = [];
+        let moveIndex = 0;
+        let board = null;
+        let playMode = false;
+        let savedMoveIndex = 0;
+        let selectedSquare = null;
+        let flipped = false;
+        let username = '';
+        
+        // Flèches et cases rouges
+        let arrows = [];
+        let redSquares = [];
+        let rightClickStart = null;
+        let isDraggingRight = false;
+        
+        // Charger le username sauvegardé
+        const savedUsername = localStorage.getItem('chess_plus_username');
+        if (savedUsername) {
+            document.getElementById('username').value = savedUsername;
+        }
+        
+        // Initialisation Pyodide
+        async function initPyodide() {
+            try {
+                document.getElementById('loading-text').textContent = 'Chargement de Python...';
+                pyodide = await loadPyodide();
+                
+                document.getElementById('loading-text').textContent = 'Installation de micropip...';
+                await pyodide.loadPackage('micropip');
+                
+                document.getElementById('loading-text').textContent = 'Installation de python-chess...';
+                const micropip = pyodide.pyimport('micropip');
+                await micropip.install('chess');
+                
+                chess = pyodide.pyimport('chess');
+                
+                // Charger le fichier chess_logic.py
+                document.getElementById('loading-text').textContent = 'Chargement des fonctions...';
+                const response = await fetch('chess_logic.py');
+                const pythonCode = await response.text();
+                pyodide.runPython(pythonCode);
+                
+                document.getElementById('loading').classList.add('hidden');
+                console.log('Python, chess et chess_logic chargés !');
+                
+                // Auto-recherche si username sauvegardé
+                if (savedUsername) {
+                    searchGames();
+                }
+            } catch (e) {
+                document.getElementById('loading-text').textContent = 'Erreur: ' + e.message;
+                console.error(e);
+            }
+        }
+        
+        // Créer l'échiquier HTML
+        function createBoard() {
+            const boardEl = document.getElementById('chessboard');
+            boardEl.innerHTML = '';
+            
+            // Générer les cases via Python
+            const squares = pyodide.runPython(`get_board_squares(${pyBool(flipped)})`).toJs();
+            
+            for (const sq of squares) {
+                const square = document.createElement('div');
+                const squareName = sq.get('square');
+                const isLight = sq.get('is_light');
+                
+                square.className = `square ${isLight ? 'light' : 'dark'}`;
+                square.dataset.square = squareName;
+                square.addEventListener('click', () => onSquareClick(squareName));
+                boardEl.appendChild(square);
+            }
+        }
+        
+        // Mettre à jour l'affichage du plateau
+        function updateBoard() {
+            if (!board) return;
+            
+            const boardFen = board.fen();
+            
+            document.querySelectorAll('.square').forEach(sq => {
+                sq.textContent = '';
+                sq.classList.remove('selected', 'legal-move', 'legal-capture', 'white-piece', 'black-piece', 'red-highlight');
+            });
+            
+            // Afficher les cases rouges
+            for (const sq of redSquares) {
+                const el = document.querySelector(`[data-square="${sq}"]`);
+                if (el) el.classList.add('red-highlight');
+            }
+            
+            // Placer les pièces via Python
+            try {
+                const pieces = pyodide.runPython(`get_board_pieces("${boardFen}")`).toJs();
+                for (const p of pieces) {
+                    const squareEl = document.querySelector(`[data-square="${p.get('square')}"]`);
+                    if (squareEl) {
+                        squareEl.textContent = p.get('symbol');
+                        squareEl.classList.add(p.get('is_white') ? 'white-piece' : 'black-piece');
+                    }
+                }
+            } catch (e) {
+                console.error('Erreur placement pièces:', e);
+            }
+            
+            // Dessiner les flèches
+            drawArrows();
+            
+            // Surligner la case sélectionnée et les coups légaux
+            if (selectedSquare && playMode) {
+                const selectedEl = document.querySelector(`[data-square="${selectedSquare}"]`);
+                if (selectedEl) selectedEl.classList.add('selected');
+                
+                // Afficher les coups légaux via Python
+                try {
+                    const result = pyodide.runPython(`get_legal_moves("${boardFen}", "${selectedSquare}")`);
+                    const [moveTargets, captureTargets] = result.toJs();
+                    
+                    for (const sq of moveTargets) {
+                        const el = document.querySelector(`[data-square="${sq}"]`);
+                        if (el) el.classList.add('legal-move');
+                    }
+                    for (const sq of captureTargets) {
+                        const el = document.querySelector(`[data-square="${sq}"]`);
+                        if (el) el.classList.add('legal-capture');
+                    }
+                } catch (e) {
+                    console.error('Erreur legal moves:', e);
+                }
+            }
+            
+            updateCapturedPieces();
+            updateMoveInfo();
+        }
+        
+        // Afficher les pièces capturées (logique en Python, affichage en JS)
+        function updateCapturedPieces() {
+            const boardFen = board.fen();
+            
+            try {
+                const display = pyodide.runPython(`get_captured_display("${boardFen}", ${pyBool(flipped)})`).toJs();
+                
+                const capturedTopEl = document.getElementById('captured-top');
+                const capturedBottomEl = document.getElementById('captured-bottom');
+                const diffTopEl = document.getElementById('material-diff-top');
+                const diffBottomEl = document.getElementById('material-diff-bottom');
+                
+                // Afficher les pièces capturées
+                capturedTopEl.innerHTML = `<span class="${display.get('top_class')}">${display.get('top_pieces')}</span>`;
+                capturedBottomEl.innerHTML = `<span class="${display.get('bottom_class')}">${display.get('bottom_pieces')}</span>`;
+                
+                // Afficher le différentiel de matériel
+                diffTopEl.style.display = display.get('show_diff_top') ? 'inline' : 'none';
+                diffBottomEl.style.display = display.get('show_diff_bottom') ? 'inline' : 'none';
+                
+                if (display.get('diff') > 0) {
+                    if (display.get('show_diff_top')) {
+                        diffTopEl.textContent = '+' + display.get('diff');
+                    }
+                    if (display.get('show_diff_bottom')) {
+                        diffBottomEl.textContent = '+' + display.get('diff');
+                    }
+                }
+            } catch (e) {
+                console.error('Erreur captured pieces:', e);
+            }
+        }
+        
+        // Clic sur une case
+        function onSquareClick(square) {
+            if (!playMode) return;
+            
+            const boardFen = board.fen();
+            
+            // Vérifier s'il y a une pièce sur la case
+            const hasPiece = pyodide.runPython(`has_piece("${boardFen}", "${square}")`);
+            
+            if (selectedSquare === null) {
+                if (hasPiece) {
+                    selectedSquare = square;
+                    updateBoard();
+                }
+            } else {
+                if (selectedSquare === square) {
+                    selectedSquare = null;
+                    updateBoard();
+                    return;
+                }
+                
+                // Essayer de jouer le coup
+                const result = pyodide.runPython(`try_move("${boardFen}", "${selectedSquare}", "${square}")`);
+                
+                if (result) {
+                    board = chess.Board(result);
+                }
+                
+                selectedSquare = null;
+                updateBoard();
+            }
+        }
+        
+        // Navigation
+        function goToMove(index) {
+            if (playMode) {
+                playMode = false;
+                document.getElementById('btn-play').textContent = 'Jouer';
+                document.getElementById('btn-play').classList.remove('play-mode');
+            }
+            
+            moveIndex = Math.max(0, Math.min(moves.length, index));
+            
+            // Reconstruire le plateau via Python
+            const newFen = pyodide.runPython(`get_position_at_move(${JSON.stringify(moves)}, ${moveIndex})`);
+            
+            board = chess.Board(newFen);
+            selectedSquare = null;
+            updateBoard();
+        }
+        
+        function updateMoveInfo() {
+            let text = `Coup ${moveIndex} / ${moves.length}`;
+            if (playMode) {
+                text += ' - MODE JEU';
+            }
+            document.getElementById('move-info').textContent = text;
+            
+            document.getElementById('btn-start').disabled = moveIndex === 0;
+            document.getElementById('btn-prev').disabled = moveIndex === 0;
+            document.getElementById('btn-next').disabled = moveIndex >= moves.length;
+            document.getElementById('btn-end').disabled = moveIndex >= moves.length;
+        }
+        
+        // Charger une partie
+        async function loadGame(pgn) {
+            try {
+                board = chess.Board();
+                moves = [];
+                moveIndex = 0;
+                selectedSquare = null;
+                
+                // Parser le PGN complet avec Python (passer via globals pour éviter les problèmes d'échappement)
+                pyodide.globals.set('_pgn_text', pgn);
+                const gameData = pyodide.runPython(`parse_pgn_full(_pgn_text)`).toJs();
+                
+                moves = gameData.get('moves');
+                
+                // Afficher les infos des joueurs
+                const white = gameData.get('white');
+                const black = gameData.get('black');
+                const whiteElo = gameData.get('white_elo');
+                const blackElo = gameData.get('black_elo');
+                
+                document.getElementById('white-player').textContent = `${white} (${whiteElo})`;
+                document.getElementById('black-player').textContent = `${black} (${blackElo})`;
+                document.getElementById('result').textContent = gameData.get('result');
+                
+                // Orienter le plateau selon le joueur
+                flipped = username.toLowerCase() === black.toLowerCase();
+                
+                createBoard();
+                updateBoard();
+                
+                document.getElementById('selector').style.display = 'none';
+                document.getElementById('viewer').classList.add('active');
+            } catch (e) {
+                console.error('Erreur loadGame:', e);
+                alert('Erreur lors du chargement de la partie: ' + e.message);
+            }
+        }
+        
+        // Rechercher des parties
+        async function searchGames() {
+            const usernameInput = document.getElementById('username');
+            username = usernameInput.value.trim();
+            if (!username) return;
+            
+            // Sauvegarder le username
+            localStorage.setItem('chess_plus_username', username);
+            
+            const btn = document.getElementById('search-btn');
+            btn.disabled = true;
+            btn.textContent = 'Chargement...';
+            
+            const gamesList = document.getElementById('games-list');
+            gamesList.innerHTML = '<p>Recherche en cours...</p>';
+            
+            try {
+                // Récupérer les archives
+                const archivesRes = await fetch(`https://api.chess.com/pub/player/${username}/games/archives`);
+                if (!archivesRes.ok) {
+                    if (archivesRes.status === 404) {
+                        gamesList.innerHTML = `<p>Joueur "${username}" introuvable</p>`;
+                        return;
+                    }
+                    throw new Error(`HTTP ${archivesRes.status}`);
+                }
+                const archivesData = await archivesRes.json();
+                
+                if (!archivesData.archives || archivesData.archives.length === 0) {
+                    gamesList.innerHTML = '<p>Aucune partie trouvée</p>';
+                    return;
+                }
+                
+                // Récupérer le dernier mois
+                const lastArchive = archivesData.archives[archivesData.archives.length - 1];
+                const gamesRes = await fetch(lastArchive);
+                const gamesData = await gamesRes.json();
+                
+                // Parser les parties avec Python en passant l'objet directement
+                pyodide.globals.set('_games_data', gamesData);
+                const parsedGamesJson = pyodide.runPython(`
+import json
+result = parse_games_from_object(_games_data.to_py())
+json.dumps(result)
+                `);
+                const games = JSON.parse(parsedGamesJson);
+                
+                gamesList.innerHTML = '';
+                
+                if (games.length === 0) {
+                    gamesList.innerHTML = '<p>Aucune partie ce mois-ci</p>';
+                    return;
+                }
+                
+                // Affichage des parties (logique d'affichage en JS)
+                for (const game of games) {
+                    const div = document.createElement('div');
+                    div.className = 'game-item';
+                    
+                    div.innerHTML = `
+                        <div class="players">⚪ ${game.white} (${game.white_elo}) vs ⚫ ${game.black} (${game.black_elo})</div>
+                        <div class="details">${game.result} • ${game.time_class} • ${game.date} ${game.time}</div>
+                    `;
+                    div.addEventListener('click', () => loadGame(game.pgn));
+                    gamesList.appendChild(div);
+                }
+            } catch (e) {
+                gamesList.innerHTML = `<p>Erreur: ${e.message}</p>`;
+                console.error(e);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Rechercher';
+            }
+        }
+        
+        // Retourner l'échiquier
+        function flipBoard() {
+            flipped = !flipped;
+            createBoard();
+            updateBoard();
+        }
+        
+        // Event listeners
+        document.getElementById('search-btn').addEventListener('click', searchGames);
+        document.getElementById('username').addEventListener('keypress', e => {
+            if (e.key === 'Enter') searchGames();
+        });
+        
+        document.getElementById('btn-start').addEventListener('click', () => goToMove(0));
+        document.getElementById('btn-prev').addEventListener('click', () => goToMove(moveIndex - 1));
+        document.getElementById('btn-next').addEventListener('click', () => goToMove(moveIndex + 1));
+        document.getElementById('btn-end').addEventListener('click', () => goToMove(moves.length));
+        document.getElementById('btn-flip').addEventListener('click', flipBoard);
+        
+        document.getElementById('btn-play').addEventListener('click', () => {
+            playMode = !playMode;
+            const btn = document.getElementById('btn-play');
+            if (playMode) {
+                savedMoveIndex = moveIndex;
+                btn.textContent = 'Voir';
+                btn.classList.add('play-mode');
+            } else {
+                goToMove(savedMoveIndex);
+                btn.textContent = 'Jouer';
+                btn.classList.remove('play-mode');
+            }
+            selectedSquare = null;
+            updateBoard();
+        });
+        
+        document.getElementById('back-btn').addEventListener('click', () => {
+            document.getElementById('viewer').classList.remove('active');
+            document.getElementById('selector').style.display = 'block';
+            playMode = false;
+            selectedSquare = null;
+            document.getElementById('btn-play').textContent = 'Jouer';
+            document.getElementById('btn-play').classList.remove('play-mode');
+        });
+        
+        // Raccourcis clavier
+        document.addEventListener('keydown', e => {
+            if (document.getElementById('viewer').classList.contains('active')) {
+                if (e.key === 'ArrowLeft') {
+                    goToMove(moveIndex - 1);
+                } else if (e.key === 'ArrowRight') {
+                    goToMove(moveIndex + 1);
+                } else if (e.key === 'ArrowUp') {
+                    goToMove(0);
+                } else if (e.key === 'ArrowDown') {
+                    goToMove(moves.length);
+                } else if (e.key === 'Escape' || e.key === 'c' || e.key === 'C') {
+                    selectedSquare = null;
+                    arrows = [];
+                    redSquares = [];
+                    updateBoard();
+                } else if (e.key === 'f' || e.key === 'F') {
+                    flipBoard();
+                }
+            }
+        });
+        
+        // Fonction pour obtenir la case depuis les coordonnées souris
+        function getSquareFromPoint(x, y) {
+            const boardEl = document.getElementById('chessboard');
+            const rect = boardEl.getBoundingClientRect();
+            const col = Math.floor((x - rect.left) / 60);
+            const row = Math.floor((y - rect.top) / 60);
+            
+            if (col < 0 || col > 7 || row < 0 || row > 7) return null;
+            
+            // Utiliser Python pour la conversion
+            return pyodide.runPython(`get_square_from_visual(${col}, ${row}, ${pyBool(flipped)})`);
+        }
+        
+        // Fonction pour obtenir le centre d'une case en pixels
+        function getSquareCenter(sq) {
+            const result = pyodide.runPython(`get_square_center("${sq}", ${pyBool(flipped)})`).toJs();
+            return { x: result.get('x'), y: result.get('y') };
+        }
+        
+        // Dessiner les flèches
+        function drawArrows() {
+            const svg = document.getElementById('arrows-svg');
+            svg.innerHTML = '';
+            
+            for (const [from, to] of arrows) {
+                const start = getSquareCenter(from);
+                const end = getSquareCenter(to);
+                
+                // Calculer l'angle
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const angle = Math.atan2(dy, dx);
+                
+                // Raccourcir la ligne pour laisser place à la tête
+                const headLen = 15;
+                const lineEndX = end.x - headLen * Math.cos(angle);
+                const lineEndY = end.y - headLen * Math.sin(angle);
+                
+                // Créer la ligne
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', start.x);
+                line.setAttribute('y1', start.y);
+                line.setAttribute('x2', lineEndX);
+                line.setAttribute('y2', lineEndY);
+                line.setAttribute('class', 'arrow-line');
+                svg.appendChild(line);
+                
+                // Créer la tête de flèche
+                const headAngle = Math.PI / 6;
+                const head = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const points = [
+                    `${end.x},${end.y}`,
+                    `${end.x - 20 * Math.cos(angle - headAngle)},${end.y - 20 * Math.sin(angle - headAngle)}`,
+                    `${end.x - 20 * Math.cos(angle + headAngle)},${end.y - 20 * Math.sin(angle + headAngle)}`
+                ].join(' ');
+                head.setAttribute('points', points);
+                head.setAttribute('class', 'arrow-head');
+                svg.appendChild(head);
+            }
+        }
+        
+        // Gestion du clic droit sur l'échiquier
+        document.getElementById('chessboard').addEventListener('contextmenu', e => {
+            e.preventDefault();
+        });
+        
+        document.getElementById('chessboard').addEventListener('mousedown', e => {
+            if (e.button === 2) { // Clic droit
+                e.preventDefault();
+                const sq = getSquareFromPoint(e.clientX, e.clientY);
+                if (sq) {
+                    rightClickStart = sq;
+                    isDraggingRight = true;
+                }
+            }
+        });
+        
+        document.addEventListener('mouseup', e => {
+            if (e.button === 2 && isDraggingRight) { // Relâcher clic droit
+                e.preventDefault();
+                const sq = getSquareFromPoint(e.clientX, e.clientY);
+                
+                if (rightClickStart && sq) {
+                    if (rightClickStart === sq) {
+                        // Clic sur place = case rouge
+                        const idx = redSquares.indexOf(sq);
+                        if (idx >= 0) {
+                            redSquares.splice(idx, 1);
+                        } else {
+                            redSquares.push(sq);
+                        }
+                    } else {
+                        // Drag = flèche
+                        const arrowKey = `${rightClickStart}-${sq}`;
+                        const existingIdx = arrows.findIndex(a => `${a[0]}-${a[1]}` === arrowKey);
+                        if (existingIdx >= 0) {
+                            arrows.splice(existingIdx, 1);
+                        } else {
+                            arrows.push([rightClickStart, sq]);
+                        }
+                    }
+                    updateBoard();
+                }
+                
+                rightClickStart = null;
+                isDraggingRight = false;
+            }
+        });
+        
+        // Effacer les annotations au clic gauche
+        document.getElementById('chessboard').addEventListener('mousedown', e => {
+            if (e.button === 0) { // Clic gauche
+                if (arrows.length > 0 || redSquares.length > 0) {
+                    arrows = [];
+                    redSquares = [];
+                    updateBoard();
+                }
+            }
+        });
+        
+        // Démarrer
+        initPyodide();
+    </script>
+</body>
+</html>
