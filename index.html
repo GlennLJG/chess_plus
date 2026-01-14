@@ -149,6 +149,7 @@
         .square.dark { background: #486ddb; }
         .square.selected { background: #7fff7f !important; }
         .square.red-highlight { background: rgba(255, 0, 0, 0.5) !important; }
+        .square.last-move { background: rgba(100, 200, 100, 0.5) !important; }
         .square.legal-move::after {
             content: '';
             width: 15px; height: 15px;
@@ -182,6 +183,11 @@
             fill: #ffa500;
             opacity: 0.8;
         }
+        /* Flèches Stockfish */
+        .stockfish-arrow-1 .arrow-line { stroke: #22aa22; }
+        .stockfish-arrow-1 .arrow-head { fill: #22aa22; }
+        .stockfish-arrow-2 .arrow-line { stroke: #66cc66; opacity: 0.6; }
+        .stockfish-arrow-2 .arrow-head { fill: #66cc66; opacity: 0.6; }
         
         .captured-row {
             display: flex;
@@ -266,6 +272,92 @@
             color: #aaa;
             text-align: center;
         }
+        
+        /* Stockfish Analysis */
+        #analysis-panel {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+        #analysis-panel h3 {
+            margin-bottom: 10px;
+            color: #ffd700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #analysis-toggle {
+            padding: 5px 10px;
+            font-size: 12px;
+            background: #486ddb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #analysis-toggle.active { background: #2a2; }
+        #eval-bar-container {
+            width: 100%;
+            height: 25px;
+            background: #333;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        #eval-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #fff 0%, #fff 50%, #333 50%, #333 100%);
+            width: 50%;
+            transition: width 0.3s ease;
+        }
+        #eval-score {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px #000;
+        }
+        #best-moves {
+            font-size: 13px;
+        }
+        #best-moves .best-move {
+            background: rgba(255,255,255,0.1);
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #best-moves .best-move:first-child {
+            background: rgba(76, 175, 80, 0.3);
+            border-left: 3px solid #4CAF50;
+        }
+        #best-moves .move-notation { font-weight: bold; }
+        #best-moves .move-eval { color: #aaa; }
+        #analysis-status {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .depth-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .depth-selector label { font-size: 12px; color: #aaa; }
+        .depth-selector input {
+            width: 60px;
+            padding: 4px;
+            border-radius: 4px;
+            border: none;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -330,10 +422,31 @@
             <div id="move-info">Coup 0 / 0</div>
             <div id="shortcuts">← → pour naviguer • Clic droit: flèches/cases rouges • C pour effacer</div>
             
+            <!-- Panneau d'analyse Stockfish -->
+            <div id="analysis-panel">
+                <h3>🔬 Analyse Stockfish <button id="analysis-toggle">Activer</button></h3>
+                <div class="depth-selector">
+                    <label>Profondeur:</label>
+                    <input type="number" id="depth-input" value="18" min="10" max="30">
+                </div>
+                <div id="eval-bar-container">
+                    <div id="eval-bar"></div>
+                    <span id="eval-score">0.0</span>
+                </div>
+                <div id="best-moves">
+                    <div class="best-move"><span class="move-notation">-</span><span class="move-eval">-</span></div>
+                    <div class="best-move"><span class="move-notation">-</span><span class="move-eval">-</span></div>
+                    <div class="best-move"><span class="move-notation">-</span><span class="move-eval">-</span></div>
+                </div>
+                <div id="analysis-status">Stockfish prêt</div>
+            </div>
+            
             <button id="back-btn">← Retour aux parties</button>
         </div>
     </div>
     
+    <!-- Stockfish WASM -->
+    <script src="https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <script>
         // Helper: convertit boolean JS en Python
@@ -351,12 +464,234 @@
         let selectedSquare = null;
         let flipped = false;
         let username = '';
+        let lastMove = null; // {from: 'e2', to: 'e4'}
         
         // Flèches et cases rouges
         let arrows = [];
         let redSquares = [];
         let rightClickStart = null;
         let isDraggingRight = false;
+        
+        // Stockfish
+        let stockfish = null;
+        let analysisEnabled = false;
+        let currentAnalysis = { score: 0, bestMoves: [], fen: '' };
+        let previousAnalysis = { score: 0, bestMoves: [], fen: '' }; // Analyse du coup précédent
+        let stockfishReady = false;
+        let lastAnalyzedFen = ''; // FEN de la dernière position analysée
+        
+        // Initialiser Stockfish
+        function initStockfish() {
+            try {
+                // Créer un blob worker pour contourner les restrictions CORS
+                const stockfishUrl = 'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js';
+                
+                // Charger Stockfish via fetch puis créer un Worker
+                fetch(stockfishUrl)
+                    .then(response => response.text())
+                    .then(code => {
+                        const blob = new Blob([code], { type: 'application/javascript' });
+                        const workerUrl = URL.createObjectURL(blob);
+                        stockfish = new Worker(workerUrl);
+                        
+                        stockfish.onmessage = function(event) {
+                            const line = event.data;
+                            console.log('Stockfish:', line);
+                            
+                            if (line === 'uciok') {
+                                stockfish.postMessage('setoption name MultiPV value 3');
+                                stockfish.postMessage('isready');
+                            }
+                            
+                            if (line === 'readyok') {
+                                stockfishReady = true;
+                                console.log('Stockfish prêt!');
+                                document.getElementById('analysis-status').textContent = 'Prêt';
+                                // Lancer l'analyse si elle était en attente
+                                if (analysisEnabled && board) {
+                                    analyzePosition();
+                                }
+                            }
+                            
+                            // Parser les infos de Stockfish
+                            if (line.startsWith('info depth')) {
+                                parseStockfishInfo(line);
+                            }
+                            
+                            if (line.startsWith('bestmove')) {
+                                document.getElementById('analysis-status').textContent = 'Analyse terminée';
+                            }
+                        };
+                        
+                        stockfish.onerror = function(e) {
+                            console.error('Erreur Stockfish Worker:', e);
+                            document.getElementById('analysis-status').textContent = 'Erreur chargement';
+                        };
+                        
+                        // Configurer Stockfish
+                        stockfish.postMessage('uci');
+                    })
+                    .catch(err => {
+                        console.error('Erreur chargement Stockfish:', err);
+                        document.getElementById('analysis-status').textContent = 'Erreur: ' + err.message;
+                    });
+            } catch (e) {
+                console.error('Erreur init Stockfish:', e);
+                document.getElementById('analysis-status').textContent = 'Erreur: ' + e.message;
+            }
+        }
+        
+        // Parser la sortie de Stockfish
+        function parseStockfishInfo(line) {
+            const depthMatch = line.match(/depth (\d+)/);
+            const scoreMatch = line.match(/score (cp|mate) (-?\d+)/);
+            // Utiliser " pv " avec espaces pour éviter de matcher "multipv"
+            const pvMatch = line.match(/ pv (.+)/);
+            const multipvMatch = line.match(/multipv (\d+)/);
+            
+            if (!scoreMatch || !pvMatch) return;
+            
+            const depth = depthMatch ? parseInt(depthMatch[1]) : 0;
+            const scoreType = scoreMatch[1];
+            let scoreValue = parseInt(scoreMatch[2]);
+            const pv = pvMatch[1].split(' ');
+            const multipv = multipvMatch ? parseInt(multipvMatch[1]) : 1;
+            
+            console.log(`Parsing multipv=${multipv}, pv=`, pv.slice(0, 3));
+            
+            // Convertir le score
+            let displayScore;
+            if (scoreType === 'mate') {
+                displayScore = scoreValue > 0 ? `M${scoreValue}` : `-M${Math.abs(scoreValue)}`;
+                scoreValue = scoreValue > 0 ? 10000 : -10000;
+            } else {
+                // Score en centipawns, convertir en pawns
+                displayScore = (scoreValue / 100).toFixed(1);
+                if (scoreValue > 0) displayScore = '+' + displayScore;
+            }
+            
+            // Ajuster selon le tour
+            const boardFen = board ? board.fen() : '';
+            const isBlackTurn = boardFen.includes(' b ');
+            if (isBlackTurn) {
+                scoreValue = -scoreValue;
+                if (scoreType === 'cp') {
+                    displayScore = (-parseFloat(displayScore)).toFixed(1);
+                    if (parseFloat(displayScore) > 0) displayScore = '+' + displayScore;
+                }
+            }
+            
+            // Stocker les meilleurs coups
+            if (multipv <= 3) {
+                if (!currentAnalysis.bestMoves[multipv - 1]) {
+                    currentAnalysis.bestMoves[multipv - 1] = {};
+                }
+                currentAnalysis.bestMoves[multipv - 1] = {
+                    moves: pv.slice(0, 3),
+                    score: displayScore,
+                    depth: depth
+                };
+                // Stocker le FEN de la position analysée
+                currentAnalysis.fen = board ? board.fen() : '';
+            }
+            
+            // Mettre à jour l'affichage
+            if (multipv === 1) {
+                currentAnalysis.score = scoreValue / 100;
+                updateEvalDisplay(displayScore, scoreValue);
+            }
+            
+            updateBestMovesDisplay();
+            drawArrows(); // Redessiner les flèches Stockfish
+            document.getElementById('analysis-status').textContent = `Profondeur: ${depth}`;
+        }
+        
+        // Mettre à jour la barre d'évaluation
+        function updateEvalDisplay(displayScore, scoreValue) {
+            const evalBar = document.getElementById('eval-bar');
+            const evalScore = document.getElementById('eval-score');
+            
+            // Calculer le pourcentage (50% = égal, 0% = noir gagne, 100% = blanc gagne)
+            // Utiliser une fonction sigmoïde pour limiter les extrêmes
+            const percentage = 50 + (Math.tanh(scoreValue / 400) * 50);
+            
+            evalBar.style.width = percentage + '%';
+            evalScore.textContent = displayScore;
+            
+            // Couleur du texte selon la position
+            if (scoreValue > 0) {
+                evalScore.style.color = '#fff';
+            } else if (scoreValue < 0) {
+                evalScore.style.color = '#333';
+            } else {
+                evalScore.style.color = '#888';
+            }
+        }
+        
+        // Afficher les meilleurs coups
+        function updateBestMovesDisplay() {
+            const container = document.getElementById('best-moves');
+            const moveElements = container.querySelectorAll('.best-move');
+            
+            currentAnalysis.bestMoves.forEach((analysis, i) => {
+                if (moveElements[i] && analysis.moves) {
+                    // Convertir UCI en SAN via Python
+                    const boardFen = board ? board.fen() : '';
+                    try {
+                        const sanMoves = pyodide.runPython(`
+uci_moves = ${JSON.stringify(analysis.moves)}
+fen = "${boardFen}"
+convert_uci_to_san(fen, uci_moves)
+                        `);
+                        moveElements[i].querySelector('.move-notation').textContent = sanMoves;
+                    } catch (e) {
+                        moveElements[i].querySelector('.move-notation').textContent = analysis.moves.join(' ');
+                    }
+                    moveElements[i].querySelector('.move-eval').textContent = analysis.score;
+                }
+            });
+        }
+        
+        // Lancer l'analyse
+        function analyzePosition() {
+            if (!analysisEnabled || !stockfish || !board) return;
+            
+            if (!stockfishReady) {
+                document.getElementById('analysis-status').textContent = 'Chargement Stockfish...';
+                return;
+            }
+            
+            const fen = board.fen();
+            const depth = parseInt(document.getElementById('depth-input').value) || 18;
+            
+            // Réinitialiser
+            currentAnalysis = { score: 0, bestMoves: [] };
+            
+            // Arrêter l'analyse précédente et lancer la nouvelle
+            stockfish.postMessage('stop');
+            stockfish.postMessage('position fen ' + fen);
+            stockfish.postMessage('go depth ' + depth);
+            
+            document.getElementById('analysis-status').textContent = 'Analyse en cours...';
+        }
+        
+        // Toggle analyse
+        function toggleAnalysis() {
+            analysisEnabled = !analysisEnabled;
+            const btn = document.getElementById('analysis-toggle');
+            
+            if (analysisEnabled) {
+                btn.textContent = 'Désactiver';
+                btn.classList.add('active');
+                if (!stockfish) initStockfish();
+                analyzePosition();
+            } else {
+                btn.textContent = 'Activer';
+                btn.classList.remove('active');
+                if (stockfish) stockfish.postMessage('stop');
+                document.getElementById('analysis-status').textContent = 'Analyse désactivée';
+            }
+        }
         
         // Charger le username sauvegardé
         const savedUsername = localStorage.getItem('chess_plus_username');
@@ -426,8 +761,16 @@
             
             document.querySelectorAll('.square').forEach(sq => {
                 sq.textContent = '';
-                sq.classList.remove('selected', 'legal-move', 'legal-capture', 'white-piece', 'black-piece', 'red-highlight');
+                sq.classList.remove('selected', 'legal-move', 'legal-capture', 'white-piece', 'black-piece', 'red-highlight', 'last-move');
             });
+            
+            // Surligner le dernier coup
+            if (lastMove) {
+                const fromEl = document.querySelector(`[data-square="${lastMove.from}"]`);
+                const toEl = document.querySelector(`[data-square="${lastMove.to}"]`);
+                if (fromEl) fromEl.classList.add('last-move');
+                if (toEl) toEl.classList.add('last-move');
+            }
             
             // Afficher les cases rouges
             for (const sq of redSquares) {
@@ -477,6 +820,11 @@
             
             updateCapturedPieces();
             updateMoveInfo();
+            
+            // Analyser la position avec Stockfish si activé
+            if (analysisEnabled) {
+                analyzePosition();
+            }
         }
         
         // Afficher les pièces capturées (logique en Python, affichage en JS)
@@ -537,6 +885,7 @@
                 const result = pyodide.runPython(`try_move("${boardFen}", "${selectedSquare}", "${square}")`);
                 
                 if (result) {
+                    lastMove = { from: selectedSquare, to: square };
                     board = chess.Board(result);
                 }
                 
@@ -553,13 +902,38 @@
                 document.getElementById('btn-play').classList.remove('play-mode');
             }
             
-            moveIndex = Math.max(0, Math.min(moves.length, index));
+            const newIndex = Math.max(0, Math.min(moves.length, index));
+            
+            // Sauvegarder l'analyse courante comme analyse précédente avant de changer de position
+            // Seulement si on avance et qu'il y a une analyse
+            if (newIndex > moveIndex && currentAnalysis.bestMoves.length > 0) {
+                previousAnalysis = JSON.parse(JSON.stringify(currentAnalysis));
+                console.log('Analyse précédente sauvegardée:', previousAnalysis);
+            } else if (newIndex < moveIndex) {
+                // Si on recule, effacer l'analyse précédente
+                previousAnalysis = { score: 0, bestMoves: [], fen: '' };
+            }
+            
+            moveIndex = newIndex;
             
             // Reconstruire le plateau via Python
             const newFen = pyodide.runPython(`get_position_at_move(${JSON.stringify(moves)}, ${moveIndex})`);
             
+            // Récupérer le dernier coup joué
+            const lastMoveResult = pyodide.runPython(`get_last_move(${JSON.stringify(moves)}, ${moveIndex})`);
+            if (lastMoveResult) {
+                const lm = lastMoveResult.toJs();
+                lastMove = { from: lm.get('from'), to: lm.get('to') };
+            } else {
+                lastMove = null;
+            }
+            
             board = chess.Board(newFen);
             selectedSquare = null;
+            
+            // Réinitialiser l'analyse courante pour la nouvelle position
+            currentAnalysis = { score: 0, bestMoves: [], fen: '' };
+            
             updateBoard();
         }
         
@@ -583,6 +957,9 @@
                 moves = [];
                 moveIndex = 0;
                 selectedSquare = null;
+                lastMove = null;
+                currentAnalysis = { score: 0, bestMoves: [], fen: '' };
+                previousAnalysis = { score: 0, bestMoves: [], fen: '' };
                 
                 // Parser le PGN complet avec Python (passer via globals pour éviter les problèmes d'échappement)
                 pyodide.globals.set('_pgn_text', pgn);
@@ -733,6 +1110,12 @@ json.dumps(result)
             document.getElementById('btn-play').classList.remove('play-mode');
         });
         
+        // Event listeners Stockfish
+        document.getElementById('analysis-toggle').addEventListener('click', toggleAnalysis);
+        document.getElementById('depth-input').addEventListener('change', () => {
+            if (analysisEnabled) analyzePosition();
+        });
+        
         // Raccourcis clavier
         document.addEventListener('keydown', e => {
             if (document.getElementById('viewer').classList.contains('active')) {
@@ -779,6 +1162,43 @@ json.dumps(result)
             const svg = document.getElementById('arrows-svg');
             svg.innerHTML = '';
             
+            // Déterminer quelle analyse afficher pour les flèches
+            // Si on a une analyse précédente (après avoir avancé), l'afficher
+            // Sinon, afficher l'analyse courante
+            let analysisToShow = null;
+            if (previousAnalysis.bestMoves && previousAnalysis.bestMoves.length > 0) {
+                analysisToShow = previousAnalysis;
+            } else if (currentAnalysis.bestMoves && currentAnalysis.bestMoves.length > 0) {
+                analysisToShow = currentAnalysis;
+            }
+            
+            // Dessiner les flèches Stockfish
+            if (analysisEnabled && analysisToShow && analysisToShow.bestMoves.length > 0) {
+                console.log('Dessin flèches Stockfish:', analysisToShow.bestMoves);
+                // Dessiner les 2 meilleurs coups (en ordre inverse pour que le meilleur soit au-dessus)
+                const maxArrows = Math.min(2, analysisToShow.bestMoves.length);
+                for (let i = maxArrows - 1; i >= 0; i--) {
+                    const analysis = analysisToShow.bestMoves[i];
+                    console.log(`Analysis ${i}:`, analysis);
+                    if (analysis && analysis.moves) {
+                        // S'assurer que moves est un tableau
+                        const movesArray = Array.isArray(analysis.moves) ? analysis.moves : Array.from(analysis.moves);
+                        console.log(`Moves array:`, movesArray);
+                        if (movesArray.length > 0) {
+                            const uciMove = movesArray[0]; // Premier coup de la ligne
+                            console.log(`Flèche ${i+1}: uciMove =`, uciMove, `type =`, typeof uciMove);
+                            if (uciMove && typeof uciMove === 'string' && uciMove.length >= 4) {
+                                const from = uciMove.substring(0, 2);
+                                const to = uciMove.substring(2, 4);
+                                console.log(`Dessin flèche de ${from} à ${to}`);
+                                drawStockfishArrow(svg, from, to, i + 1);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Dessiner les flèches utilisateur (orange) par-dessus
             for (const [from, to] of arrows) {
                 const start = getSquareCenter(from);
                 const end = getSquareCenter(to);
@@ -813,6 +1233,54 @@ json.dumps(result)
                 head.setAttribute('points', points);
                 head.setAttribute('class', 'arrow-head');
                 svg.appendChild(head);
+            }
+        }
+        
+        // Dessiner une flèche Stockfish
+        function drawStockfishArrow(svg, from, to, rank) {
+            console.log(`drawStockfishArrow: ${from} -> ${to}, rank=${rank}`);
+            
+            try {
+                const start = getSquareCenter(from);
+                const end = getSquareCenter(to);
+                
+                console.log(`Coordonnées: start=(${start.x}, ${start.y}), end=(${end.x}, ${end.y})`);
+                
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const angle = Math.atan2(dy, dx);
+                
+                const headLen = 15;
+                const lineEndX = end.x - headLen * Math.cos(angle);
+                const lineEndY = end.y - headLen * Math.sin(angle);
+                
+                // Groupe pour appliquer la classe CSS
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('class', `stockfish-arrow-${rank}`);
+                
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', start.x);
+                line.setAttribute('y1', start.y);
+                line.setAttribute('x2', lineEndX);
+                line.setAttribute('y2', lineEndY);
+                line.setAttribute('class', 'arrow-line');
+                group.appendChild(line);
+                
+                const headAngle = Math.PI / 6;
+                const head = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const points = [
+                    `${end.x},${end.y}`,
+                    `${end.x - 20 * Math.cos(angle - headAngle)},${end.y - 20 * Math.sin(angle - headAngle)}`,
+                    `${end.x - 20 * Math.cos(angle + headAngle)},${end.y - 20 * Math.sin(angle + headAngle)}`
+                ].join(' ');
+                head.setAttribute('points', points);
+                head.setAttribute('class', 'arrow-head');
+                group.appendChild(head);
+                
+                svg.appendChild(group);
+                console.log('Flèche ajoutée au SVG');
+            } catch (e) {
+                console.error('Erreur drawStockfishArrow:', e);
             }
         }
         
@@ -877,6 +1345,7 @@ json.dumps(result)
         
         // Démarrer
         initPyodide();
+        initStockfish();
     </script>
 </body>
 </html>

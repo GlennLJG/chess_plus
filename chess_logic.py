@@ -474,3 +474,62 @@ def get_board_squares(flipped: bool) -> list[dict]:
             })
     
     return squares
+
+
+def convert_uci_to_san(fen: str, uci_moves: list[str]) -> str:
+    """
+    Convertit une liste de coups UCI en notation SAN.
+    
+    Args:
+        fen: Position de départ en FEN
+        uci_moves: Liste des coups en notation UCI (ex: ["e2e4", "e7e5"])
+    
+    Returns:
+        Chaîne des coups en notation SAN (ex: "e4 e5 Nf3")
+    """
+    board = chess.Board(fen)
+    san_moves = []
+    
+    for uci in uci_moves:
+        try:
+            move = chess.Move.from_uci(uci)
+            if move in board.legal_moves:
+                san_moves.append(board.san(move))
+                board.push(move)
+            else:
+                break
+        except:
+            break
+    
+    return ' '.join(san_moves)
+
+
+def get_last_move(moves_list: list[str], move_index: int) -> dict | None:
+    """
+    Retourne les cases de départ et d'arrivée du dernier coup joué.
+    
+    Args:
+        moves_list: Liste des coups en notation SAN
+        move_index: Index du coup actuel (1-based pour le dernier coup joué)
+    
+    Returns:
+        {'from': 'e2', 'to': 'e4'} ou None si aucun coup
+    """
+    if move_index <= 0 or not moves_list:
+        return None
+    
+    board = chess.Board()
+    last_move = None
+    
+    for i in range(min(move_index, len(moves_list))):
+        move = board.parse_san(moves_list[i])
+        last_move = move
+        board.push(move)
+    
+    if last_move:
+        return {
+            'from': chess.square_name(last_move.from_square),
+            'to': chess.square_name(last_move.to_square)
+        }
+    
+    return None
