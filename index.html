@@ -537,7 +537,9 @@
                 const workerCode = `
                     // Buffer WASM reçu via postMessage
                     let wasmBinary = null;
-                    let pendingUci = [];
+                    let wasmReady = new Promise(resolve => {
+                        self._resolveWasm = resolve;
+                    });
                     
                     // Sauvegarder les originaux
                     const originalFetch = self.fetch.bind(self);
@@ -545,49 +547,56 @@
                     const originalInstantiateStreaming = WebAssembly.instantiateStreaming ? WebAssembly.instantiateStreaming.bind(WebAssembly) : null;
                     
                     // Override fetch pour intercepter TOUTES les requêtes
-                    // Dans ce Worker dédié à Stockfish, la seule requête fetch est pour le WASM
-                    self.fetch = function(url, options) {
+                    self.fetch = async function(url, options) {
                         const urlStr = String(url);
                         console.log('fetch intercepté:', urlStr.substring(0, 80));
                         
-                        // Retourner le WASM préchargé pour toute requête
-                        return new Promise((resolve, reject) => {
-                            const check = setInterval(() => {
-                                if (wasmBinary) {
-                                    clearInterval(check);
-                                    console.log('Retour WASM préchargé');
-                                    resolve(new Response(wasmBinary.slice(0), {
-                                        status: 200,
-                                        headers: { 'Content-Type': 'application/wasm' }
-                                    }));
-                                }
-                            }, 10);
-                            // Timeout après 30 secondes
-                            setTimeout(() => {
-                                clearInterval(check);
-                                if (!wasmBinary) {
-                                    reject(new Error('WASM timeout'));
-                                }
-                            }, 30000);
+                        // Attendre que le WASM soit disponible
+                        await wasmReady;
+                        console.log('Retour WASM préchargé depuis fetch');
+                        return new Response(wasmBinary.slice(0), {
+                            status: 200,
+                            headers: { 'Content-Type': 'application/wasm' }
                         });
                     };
                     
                     // Override instantiateStreaming pour utiliser notre WASM
                     WebAssembly.instantiateStreaming = async function(source, imports) {
                         console.log('instantiateStreaming intercepté');
-                        // Attendre le WASM si pas encore reçu
-                        while (!wasmBinary) {
-                            await new Promise(r => setTimeout(r, 10));
-                        }
+                        await wasmReady;
+                        console.log('Compilation WASM...');
                         return originalInstantiate(wasmBinary, imports);
                     };
                     
-                    // Intercepter les messages
+                    // Override instantiate aussi (certaines versions l'utilisent directement)
+                    WebAssembly.instantiate = async function(bufferOrModule, imports) {
+                        // Si c'est un buffer qui vient d'un fetch, utiliser notre WASM
+                        if (bufferOrModule instanceof ArrayBuffer || bufferOrModule instanceof Uint8Array) {
+                            console.log('instantiate avec buffer intercepté');
+                            await wasmReady;
+                            return originalInstantiate(wasmBinary, imports);
+                        }
+                        // Si c'est déjà un module compilé, le passer tel quel
+                        return originalInstantiate(bufferOrModule, imports);
+                    };
+                    
+                    // Intercepter les messages AVANT le code Stockfish
+                    self.addEventListener('message', function(e) {
+                        // Message spécial pour recevoir le WASM
+                        if (e.data && e.data.cmd === 'setWasm') {
+                            wasmBinary = e.data.wasmBinary;
+                            console.log('WASM reçu:', wasmBinary.byteLength, 'bytes');
+                            self._resolveWasm();
+                            return;
+                        }
+                    });
+                    
+                    // Intercepter les messages UCI via onmessage
                     let stockfishOnMessage = null;
-                    const originalOnMessageSetter = Object.getOwnPropertyDescriptor(self, 'onmessage') || {};
                     
                     Object.defineProperty(self, 'onmessage', {
                         set: function(handler) {
+                            console.log('Stockfish a défini onmessage');
                             stockfishOnMessage = handler;
                         },
                         get: function() {
@@ -596,12 +605,6 @@
                     });
                     
                     self.addEventListener('message', function(e) {
-                        // Message spécial pour recevoir le WASM
-                        if (e.data && e.data.cmd === 'setWasm') {
-                            wasmBinary = e.data.wasmBinary;
-                            console.log('WASM reçu:', wasmBinary.byteLength, 'bytes');
-                            return;
-                        }
                         // Messages UCI - les transmettre au handler Stockfish
                         if (typeof e.data === 'string' && stockfishOnMessage) {
                             stockfishOnMessage(e);
