@@ -248,6 +248,35 @@
         #controls button:disabled { background: #666; cursor: not-allowed; }
         #controls button.play-mode { background: #2a2; }
         
+        /* Classification des coups */
+        #move-quality {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 10px 0;
+            font-size: 14px;
+            min-height: 28px;
+        }
+        .quality-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .quality-brilliant { background: #1baca6; color: #fff; }
+        .quality-great { background: #5c9ccc; color: #fff; }
+        .quality-best { background: #96bc4b; color: #fff; }
+        .quality-excellent { background: #96bc4b; color: #fff; }
+        .quality-good { background: #a0c35a; color: #fff; }
+        .quality-book { background: #a88b5a; color: #fff; }
+        .quality-inaccuracy { background: #f7c631; color: #000; }
+        .quality-mistake { background: #e6912c; color: #fff; }
+        .quality-miss { background: #9b59b6; color: #fff; }
+        .quality-blunder { background: #ca3431; color: #fff; }
+        .quality-forced { background: #888; color: #fff; }
+        .quality-none { background: transparent; }
+        
         #move-info {
             text-align: center;
             margin-top: 10px;
@@ -300,7 +329,7 @@
         #eval-bar-container {
             width: 100%;
             height: 25px;
-            background: #333;
+            background: #222;
             border-radius: 5px;
             overflow: hidden;
             margin-bottom: 10px;
@@ -308,7 +337,7 @@
         }
         #eval-bar {
             height: 100%;
-            background: linear-gradient(90deg, #fff 0%, #fff 50%, #333 50%, #333 100%);
+            background: #f0f0f0;
             width: 50%;
             transition: width 0.3s ease;
         }
@@ -420,11 +449,12 @@
             </div>
             
             <div id="move-info">Coup 0 / 0</div>
+            <div id="move-quality"></div>
             <div id="shortcuts">← → pour naviguer • Clic droit: flèches/cases rouges • C pour effacer</div>
             
-            <!-- Panneau d'analyse Stockfish -->
+            <!-- Panneau d'analyse Stockfish 17.1 -->
             <div id="analysis-panel">
-                <h3>🔬 Analyse Stockfish <button id="analysis-toggle">Activer</button></h3>
+                <h3>🔬 Stockfish 17.1 <button id="analysis-toggle">Activer</button></h3>
                 <div class="depth-selector">
                     <label>Profondeur:</label>
                     <input type="number" id="depth-input" value="18" min="10" max="30">
@@ -445,8 +475,7 @@
         </div>
     </div>
     
-    <!-- Stockfish WASM -->
-    <script src="https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js"></script>
+    <!-- Pyodide pour Python -->
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
     <script>
         // Helper: convertit boolean JS en Python
@@ -479,14 +508,181 @@
         let previousAnalysis = { score: 0, bestMoves: [], fen: '' }; // Analyse du coup précédent
         let stockfishReady = false;
         let lastAnalyzedFen = ''; // FEN de la dernière position analysée
+        let moveEvaluations = []; // Stocke les évaluations pour chaque coup [{ eval: 0.5, quality: {...} }, ...]
         
-        // Initialiser Stockfish
+        // Initialiser Stockfish 17.1 (lite-single version avec NNUE)
         function initStockfish() {
+            document.getElementById('analysis-status').textContent = 'Chargement Stockfish 17.1...';
+            
+            // Stockfish 17.1 lite-single (single-threaded, ~7MB, compatible sans headers CORS)
+            // Utilisation de unpkg car jsdelivr bloque certains fichiers
+            const baseUrl = 'https://unpkg.com/stockfish@17.1.0/src/';
+            const jsFile = 'stockfish-17.1-lite-single-03e3232.js';
+            const wasmFile = 'stockfish-17.1-lite-single-03e3232.wasm';
+            
+            // Charger le JS et le WASM via fetch
+            Promise.all([
+                fetch(baseUrl + jsFile).then(r => {
+                    if (!r.ok) throw new Error('JS fetch failed: ' + r.status);
+                    return r.text();
+                }),
+                fetch(baseUrl + wasmFile).then(r => {
+                    if (!r.ok) throw new Error('WASM fetch failed: ' + r.status);
+                    return r.arrayBuffer();
+                })
+            ]).then(([jsCode, wasmBuffer]) => {
+                console.log('Stockfish 17.1: JS et WASM chargés (' + (wasmBuffer.byteLength / 1024 / 1024).toFixed(1) + ' MB), création du Worker...');
+                
+                // Créer un Worker qui override fetch et WebAssembly pour utiliser notre WASM préchargé
+                const workerCode = `
+                    // Buffer WASM reçu via postMessage
+                    let wasmBinary = null;
+                    let pendingUci = [];
+                    
+                    // Sauvegarder les originaux
+                    const originalFetch = self.fetch.bind(self);
+                    const originalInstantiate = WebAssembly.instantiate.bind(WebAssembly);
+                    const originalInstantiateStreaming = WebAssembly.instantiateStreaming ? WebAssembly.instantiateStreaming.bind(WebAssembly) : null;
+                    
+                    // Override fetch pour intercepter les requêtes WASM
+                    self.fetch = function(url, options) {
+                        try {
+                            const urlStr = String(url);
+                            // Intercepter toute requête WASM ou URL malformée (blob worker)
+                            if (urlStr.includes('.wasm') || urlStr.includes('blob:') || urlStr.includes('localhost:8000http')) {
+                                console.log('fetch intercepté pour WASM:', urlStr.substring(0, 50));
+                                // Attendre que le WASM soit disponible
+                                return new Promise((resolve) => {
+                                    const check = setInterval(() => {
+                                        if (wasmBinary) {
+                                            clearInterval(check);
+                                            resolve(new Response(wasmBinary.slice(0), {
+                                                status: 200,
+                                                headers: { 'Content-Type': 'application/wasm' }
+                                            }));
+                                        }
+                                    }, 10);
+                                });
+                            }
+                            return originalFetch(url, options);
+                        } catch (e) {
+                            // Si l'URL est invalide, retourner le WASM
+                            console.log('fetch erreur, retour WASM:', e.message);
+                            return new Promise((resolve) => {
+                                const check = setInterval(() => {
+                                    if (wasmBinary) {
+                                        clearInterval(check);
+                                        resolve(new Response(wasmBinary.slice(0), {
+                                            status: 200,
+                                            headers: { 'Content-Type': 'application/wasm' }
+                                        }));
+                                    }
+                                }, 10);
+                            });
+                        }
+                    };
+                    
+                    // Override instantiateStreaming pour utiliser notre WASM
+                    WebAssembly.instantiateStreaming = async function(source, imports) {
+                        console.log('instantiateStreaming intercepté');
+                        // Attendre le WASM si pas encore reçu
+                        while (!wasmBinary) {
+                            await new Promise(r => setTimeout(r, 10));
+                        }
+                        return originalInstantiate(wasmBinary, imports);
+                    };
+                    
+                    // Intercepter les messages
+                    let stockfishOnMessage = null;
+                    const originalOnMessageSetter = Object.getOwnPropertyDescriptor(self, 'onmessage') || {};
+                    
+                    Object.defineProperty(self, 'onmessage', {
+                        set: function(handler) {
+                            stockfishOnMessage = handler;
+                        },
+                        get: function() {
+                            return stockfishOnMessage;
+                        }
+                    });
+                    
+                    self.addEventListener('message', function(e) {
+                        // Message spécial pour recevoir le WASM
+                        if (e.data && e.data.cmd === 'setWasm') {
+                            wasmBinary = e.data.wasmBinary;
+                            console.log('WASM reçu:', wasmBinary.byteLength, 'bytes');
+                            return;
+                        }
+                        // Messages UCI - les transmettre au handler Stockfish
+                        if (typeof e.data === 'string' && stockfishOnMessage) {
+                            stockfishOnMessage(e);
+                        }
+                    });
+                    
+                    // Code Stockfish
+                    ${jsCode}
+                `;
+                
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                stockfish = new Worker(workerUrl);
+                
+                // Envoyer le WASM au Worker (avec transfert pour éviter la copie)
+                stockfish.postMessage({ cmd: 'setWasm', wasmBinary: wasmBuffer }, [wasmBuffer]);
+                
+                stockfish.onmessage = function(event) {
+                    const line = event.data;
+                    if (typeof line !== 'string') return;
+                    
+                    console.log('Stockfish 17.1:', line);
+                    
+                    if (line === 'uciok') {
+                        stockfish.postMessage('setoption name MultiPV value 3');
+                        stockfish.postMessage('isready');
+                    }
+                    
+                    if (line === 'readyok') {
+                        stockfishReady = true;
+                        console.log('Stockfish 17.1 prêt avec NNUE!');
+                        document.getElementById('analysis-status').textContent = 'Prêt (SF 17.1 NNUE)';
+                        if (analysisEnabled && board) {
+                            analyzePosition();
+                        }
+                    }
+                    
+                    if (line.startsWith('info depth')) {
+                        parseStockfishInfo(line);
+                    }
+                    
+                    if (line.startsWith('bestmove')) {
+                        document.getElementById('analysis-status').textContent = 'Analyse terminée';
+                    }
+                };
+                
+                stockfish.onerror = function(e) {
+                    console.error('Erreur Stockfish 17.1 Worker:', e);
+                    console.log('Fallback vers Stockfish 10...');
+                    initStockfishFallback();
+                };
+                
+                // Envoyer UCI après un petit délai pour laisser le temps au WASM d'être traité
+                setTimeout(() => {
+                    stockfish.postMessage('uci');
+                }, 200);
+                
+            }).catch(err => {
+                console.error('Erreur chargement Stockfish 17.1:', err);
+                console.log('Fallback vers Stockfish 10...');
+                initStockfishFallback();
+            });
+        }
+        
+        // Fallback vers Stockfish 10 si 17.1 ne fonctionne pas
+        function initStockfishFallback() {
             try {
-                // Créer un blob worker pour contourner les restrictions CORS
+                document.getElementById('analysis-status').textContent = 'Chargement Stockfish (fallback)...';
+                
                 const stockfishUrl = 'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js';
                 
-                // Charger Stockfish via fetch puis créer un Worker
                 fetch(stockfishUrl)
                     .then(response => response.text())
                     .then(code => {
@@ -496,7 +692,7 @@
                         
                         stockfish.onmessage = function(event) {
                             const line = event.data;
-                            console.log('Stockfish:', line);
+                            console.log('Stockfish 10:', line);
                             
                             if (line === 'uciok') {
                                 stockfish.postMessage('setoption name MultiPV value 3');
@@ -505,15 +701,12 @@
                             
                             if (line === 'readyok') {
                                 stockfishReady = true;
-                                console.log('Stockfish prêt!');
-                                document.getElementById('analysis-status').textContent = 'Prêt';
-                                // Lancer l'analyse si elle était en attente
+                                document.getElementById('analysis-status').textContent = 'Prêt (SF 10)';
                                 if (analysisEnabled && board) {
                                     analyzePosition();
                                 }
                             }
                             
-                            // Parser les infos de Stockfish
                             if (line.startsWith('info depth')) {
                                 parseStockfishInfo(line);
                             }
@@ -524,19 +717,18 @@
                         };
                         
                         stockfish.onerror = function(e) {
-                            console.error('Erreur Stockfish Worker:', e);
+                            console.error('Erreur Stockfish Worker (fallback):', e);
                             document.getElementById('analysis-status').textContent = 'Erreur chargement';
                         };
                         
-                        // Configurer Stockfish
                         stockfish.postMessage('uci');
                     })
                     .catch(err => {
-                        console.error('Erreur chargement Stockfish:', err);
+                        console.error('Erreur chargement Stockfish fallback:', err);
                         document.getElementById('analysis-status').textContent = 'Erreur: ' + err.message;
                     });
             } catch (e) {
-                console.error('Erreur init Stockfish:', e);
+                console.error('Erreur init Stockfish fallback:', e);
                 document.getElementById('analysis-status').textContent = 'Erreur: ' + e.message;
             }
         }
@@ -599,6 +791,64 @@
             if (multipv === 1) {
                 currentAnalysis.score = scoreValue / 100;
                 updateEvalDisplay(displayScore, scoreValue);
+                
+                // Calculer la qualité du coup si on a l'évaluation précédente
+                if (moveIndex > 0 && moveEvaluations[moveIndex] && moveEvaluations[moveIndex].evalBefore !== undefined) {
+                    const evalBefore = moveEvaluations[moveIndex].evalBefore;
+                    const evalAfter = currentAnalysis.score;
+                    const wasWhiteTurn = moveEvaluations[moveIndex].wasWhiteTurn;
+                    
+                    // Vérifier si c'était un coup forcé (un seul coup légal)
+                    let wasOnlyLegalMove = false;
+                    let bestMoveWasPlayed = false;
+                    let wasSacrifice = false;
+                    
+                    try {
+                        const prevFen = pyodide.runPython(`get_position_at_move(${JSON.stringify(moves)}, ${moveIndex - 1})`);
+                        const legalMovesCount = pyodide.runPython(`len(list(chess.Board("${prevFen}").legal_moves))`);
+                        wasOnlyLegalMove = (legalMovesCount === 1);
+                        
+                        // Vérifier si le coup joué était le meilleur coup de Stockfish
+                        if (previousAnalysis.bestMoves && previousAnalysis.bestMoves.length > 0) {
+                            const bestMoveUci = previousAnalysis.bestMoves[0].moves[0];
+                            const playedMove = moves[moveIndex - 1];
+                            
+                            // Convertir le meilleur coup UCI en SAN pour comparer
+                            try {
+                                const bestMoveSan = pyodide.runPython(`convert_uci_to_san("${prevFen}", ["${bestMoveUci}"])`);
+                                bestMoveWasPlayed = (bestMoveSan.trim() === playedMove.trim());
+                            } catch (e) {}
+                            
+                            // Vérifier si c'était un sacrifice (capture de notre pièce après notre coup)
+                            // Simplifié: on considère sacrifice si on donne du matériel mais améliore l'éval
+                            try {
+                                const materialBefore = pyodide.runPython(`
+board = chess.Board("${prevFen}")
+sum(v for p, v in {'P':1,'N':3,'B':3,'R':5,'Q':9,'p':-1,'n':-3,'b':-3,'r':-5,'q':-9}.items() 
+    for sq in chess.SQUARES if board.piece_at(sq) and board.piece_at(sq).symbol() == p)
+                                `);
+                                const currentFen = board ? board.fen() : '';
+                                const materialAfter = pyodide.runPython(`
+board = chess.Board("${currentFen}")
+sum(v for p, v in {'P':1,'N':3,'B':3,'R':5,'Q':9,'p':-1,'n':-3,'b':-3,'r':-5,'q':-9}.items() 
+    for sq in chess.SQUARES if board.piece_at(sq) and board.piece_at(sq).symbol() == p)
+                                `);
+                                // Sacrifice si on a perdu du matériel mais l'éval s'est améliorée
+                                const materialLoss = wasWhiteTurn ? (materialBefore - materialAfter) : (materialAfter - materialBefore);
+                                const evalImproved = wasWhiteTurn ? (evalAfter > evalBefore) : (evalAfter < evalBefore);
+                                wasSacrifice = materialLoss > 0 && evalImproved;
+                            } catch (e) {}
+                        }
+                    } catch (e) {
+                        console.error('Erreur analyse coup:', e);
+                    }
+                    
+                    const quality = classifyMove(evalBefore, evalAfter, wasWhiteTurn, wasOnlyLegalMove, bestMoveWasPlayed, wasSacrifice);
+                    moveEvaluations[moveIndex].evalAfter = evalAfter;
+                    moveEvaluations[moveIndex].quality = quality;
+                    
+                    updateMoveQualityDisplay();
+                }
             }
             
             updateBestMovesDisplay();
@@ -612,19 +862,101 @@
             const evalScore = document.getElementById('eval-score');
             
             // Calculer le pourcentage (50% = égal, 0% = noir gagne, 100% = blanc gagne)
-            // Utiliser une fonction sigmoïde pour limiter les extrêmes
-            const percentage = 50 + (Math.tanh(scoreValue / 400) * 50);
+            // scoreValue est en centipawns, utiliser une fonction sigmoïde pour limiter les extrêmes
+            // Diviser par 100 pour avoir des pions, puis appliquer tanh
+            const pawnScore = scoreValue / 100;
+            const percentage = 50 + (Math.tanh(pawnScore / 4) * 50);
             
             evalBar.style.width = percentage + '%';
             evalScore.textContent = displayScore;
             
-            // Couleur du texte selon la position
-            if (scoreValue > 0) {
+            // Couleur du texte selon la position (le texte doit être visible sur le fond)
+            if (percentage > 55) {
+                evalScore.style.color = '#000';
+                evalScore.style.textShadow = 'none';
+            } else if (percentage < 45) {
                 evalScore.style.color = '#fff';
-            } else if (scoreValue < 0) {
-                evalScore.style.color = '#333';
+                evalScore.style.textShadow = 'none';
             } else {
-                evalScore.style.color = '#888';
+                evalScore.style.color = '#fff';
+                evalScore.style.textShadow = '1px 1px 2px #000, -1px -1px 2px #000';
+            }
+        }
+        
+        // Classifier la qualité d'un coup basé sur la perte d'évaluation
+        function classifyMove(evalBefore, evalAfter, isWhiteTurn, wasOnlyLegalMove, bestMoveWasPlayed, wasSacrifice) {
+            // evalBefore et evalAfter sont en pions (pas centipawns)
+            // Positif = avantage blanc, négatif = avantage noir
+            
+            // Si c'était le seul coup légal
+            if (wasOnlyLegalMove) {
+                return { quality: 'forced', label: 'Forcé', icon: '●' };
+            }
+            
+            // Calculer la perte du point de vue du joueur qui a joué
+            let evalLoss;
+            if (isWhiteTurn) {
+                // Les blancs viennent de jouer
+                evalLoss = evalBefore - evalAfter;
+            } else {
+                // Les noirs viennent de jouer
+                evalLoss = evalAfter - evalBefore;
+            }
+            
+            // Détecter si c'était une opportunité manquée (grande amélioration possible mais pas prise)
+            const missedOpportunity = evalLoss > 1.5 && Math.abs(evalBefore) > 2.0;
+            
+            // Classification très optimiste - seuils très indulgents
+            if (evalLoss <= 0 && wasSacrifice) {
+                // Brillant: sacrifice de matériel + amélioration
+                return { quality: 'brilliant', label: 'Brillant', icon: '!!' };
+            } else if (evalLoss <= 0 && bestMoveWasPlayed) {
+                // Meilleur coup: exactement le coup #1 du moteur
+                return { quality: 'best', label: 'Meilleur', icon: '✓' };
+            } else if (evalLoss <= 0.05) {
+                // Grand coup: coup crucial (perte < 0.05)
+                return { quality: 'great', label: 'Grand', icon: '!' };
+            } else if (evalLoss <= 0.2) {
+                // Excellent: quasi identique au meilleur
+                return { quality: 'excellent', label: 'Excellent', icon: '✓' };
+            } else if (evalLoss <= 0.5) {
+                // Bon: jouable, petite perte
+                return { quality: 'good', label: 'Bon', icon: '✓' };
+            } else if (evalLoss <= 1.2) {
+                // Imprécision: affaiblit légèrement
+                return { quality: 'inaccuracy', label: 'Imprécision', icon: '?!' };
+            } else if (missedOpportunity) {
+                // Manqué: opportunité tactique ratée
+                return { quality: 'miss', label: 'Manqué', icon: '✕' };
+            } else if (evalLoss <= 2.5) {
+                // Erreur: dégrade sensiblement
+                return { quality: 'mistake', label: 'Erreur', icon: '?' };
+            } else {
+                // Gaffe: pire erreur possible (>2.5 pions)
+                return { quality: 'blunder', label: 'Gaffe', icon: '??' };
+            }
+        }
+        
+        // Mettre à jour l'affichage de la qualité du coup
+        function updateMoveQualityDisplay() {
+            const container = document.getElementById('move-quality');
+            
+            if (!analysisEnabled || moveIndex === 0 || !moveEvaluations[moveIndex]) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            const evalData = moveEvaluations[moveIndex];
+            if (evalData && evalData.quality) {
+                const q = evalData.quality;
+                container.innerHTML = `
+                    <span class="quality-badge quality-${q.quality}">
+                        ${q.icon ? q.icon + ' ' : ''}${q.label}
+                    </span>
+                    <span style="opacity: 0.7;">${moves[moveIndex - 1]}</span>
+                `;
+            } else {
+                container.innerHTML = '';
             }
         }
         
@@ -903,12 +1235,24 @@ convert_uci_to_san(fen, uci_moves)
             }
             
             const newIndex = Math.max(0, Math.min(moves.length, index));
+            const wasAdvancing = newIndex > moveIndex;
             
             // Sauvegarder l'analyse courante comme analyse précédente avant de changer de position
             // Seulement si on avance et qu'il y a une analyse
-            if (newIndex > moveIndex && currentAnalysis.bestMoves.length > 0) {
+            if (wasAdvancing && currentAnalysis.bestMoves.length > 0) {
                 previousAnalysis = JSON.parse(JSON.stringify(currentAnalysis));
-                console.log('Analyse précédente sauvegardée:', previousAnalysis);
+                
+                // Calculer et stocker la qualité du coup si on avance d'un coup
+                if (newIndex === moveIndex + 1 && previousAnalysis.score !== undefined) {
+                    // On stockera l'évaluation après avoir analysé la nouvelle position
+                    // Pour l'instant, stocker l'eval avant le coup
+                    if (!moveEvaluations[newIndex]) {
+                        moveEvaluations[newIndex] = {};
+                    }
+                    moveEvaluations[newIndex].evalBefore = previousAnalysis.score;
+                    // Déterminer si c'était le tour des blancs (avant le coup)
+                    moveEvaluations[newIndex].wasWhiteTurn = (newIndex % 2 === 1);
+                }
             } else if (newIndex < moveIndex) {
                 // Si on recule, effacer l'analyse précédente
                 previousAnalysis = { score: 0, bestMoves: [], fen: '' };
@@ -948,6 +1292,9 @@ convert_uci_to_san(fen, uci_moves)
             document.getElementById('btn-prev').disabled = moveIndex === 0;
             document.getElementById('btn-next').disabled = moveIndex >= moves.length;
             document.getElementById('btn-end').disabled = moveIndex >= moves.length;
+            
+            // Afficher la qualité du coup si disponible
+            updateMoveQualityDisplay();
         }
         
         // Charger une partie
@@ -960,6 +1307,7 @@ convert_uci_to_san(fen, uci_moves)
                 lastMove = null;
                 currentAnalysis = { score: 0, bestMoves: [], fen: '' };
                 previousAnalysis = { score: 0, bestMoves: [], fen: '' };
+                moveEvaluations = []; // Réinitialiser les évaluations
                 
                 // Parser le PGN complet avec Python (passer via globals pour éviter les problèmes d'échappement)
                 pyodide.globals.set('_pgn_text', pgn);
