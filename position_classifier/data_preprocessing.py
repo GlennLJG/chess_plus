@@ -10,9 +10,10 @@ import json
 config = configparser.ConfigParser()
 config.read("position_classifier/config.ini")
 #récupération des paramètres
+raw_data_path = config.get('preprocessing', 'raw_data_path')
 sample_size = config.getint('preprocessing', 'sample_size')
 
-raw_data=pl.read_csv("position_classifier/data/raw/lichess_db_puzzle.csv")
+raw_data=pl.read_csv(raw_data_path)
 
 #limiter aux 100 premières lignes
 raw_data=raw_data.head(sample_size)

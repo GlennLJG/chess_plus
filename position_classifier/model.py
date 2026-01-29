@@ -4,7 +4,9 @@ import configparser
 
 # Lecture du fichier de configuration
 config = configparser.ConfigParser()
-config.read('position_classifier/config.ini')
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'config.ini')
+config.read(config_path)
 # Récupération des paramètres du modèle
 dropout_rate = config.getfloat('model', 'dropout_rate')
 hidden_dim = config.getint('model', 'hidden_dim')

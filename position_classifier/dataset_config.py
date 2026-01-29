@@ -10,7 +10,9 @@ from torch.nn.utils.rnn import pad_sequence
 
 #lecture du fichier de config
 config = configparser.ConfigParser()
-config.read('position_classifier/config.ini')
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'config.ini')
+config.read(config_path)
 #récupération des paramètressys.exit(0) 
 formatage = config.get('dataset', 'formatage_type')
 batch_size = config.getint('dataset', 'batch_size')

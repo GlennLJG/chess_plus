@@ -11,7 +11,9 @@ from sklearn.metrics import f1_score
 
 # --- CONFIGURATION ---
 config = configparser.ConfigParser()
-config.read('position_classifier/config.ini')
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'config.ini')
+config.read(config_path)
 
 epochs = config.getint('train', 'epochs')
 learning_rate = config.getfloat('train', 'learning_rate')
