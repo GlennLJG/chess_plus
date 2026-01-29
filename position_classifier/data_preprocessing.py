@@ -5,10 +5,13 @@ import torch
 import torch.nn as nn
 import numpy as np
 import json
+import os
 
 #lecture du fichier de config
 config = configparser.ConfigParser()
-config.read("position_classifier/config.ini")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(script_dir, 'config.ini')
+config.read(config_path)
 #récupération des paramètres
 raw_data_path = config.get('preprocessing', 'raw_data_path')
 sample_size = config.getint('preprocessing', 'sample_size')

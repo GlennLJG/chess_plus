@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import configparser
+import os
 
 # Lecture du fichier de configuration
 config = configparser.ConfigParser()
