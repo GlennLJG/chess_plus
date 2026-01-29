@@ -11,7 +11,7 @@ from torch.nn.utils.rnn import pad_sequence
 #lecture du fichier de config
 config = configparser.ConfigParser()
 config.read('position_classifier/config.ini')
-#récupération des paramètres
+#récupération des paramètressys.exit(0) 
 formatage = config.get('dataset', 'formatage_type')
 batch_size = config.getint('dataset', 'batch_size')
 train_split = config.getfloat('dataset', 'train_split')
