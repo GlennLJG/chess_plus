@@ -1,0 +1,7 @@
+polars
+chess
+matplotlib
+seaborn
+torch
+scikit-learn
+scikit-multilearn

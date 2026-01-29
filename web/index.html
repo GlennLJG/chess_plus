@@ -1,0 +1,1677 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Plus - Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 20px; color: #ffd700; }
+        
+        #loading {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #loading.hidden { display: none; }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 5px solid #333;
+            border-top-color: #ffd700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #loading-text { margin-top: 20px; }
+        
+        #app { display: flex; gap: 30px; flex-wrap: wrap; justify-content: center; }
+        
+        /* Sélecteur de parties */
+        #selector {
+            background: #754840;
+            padding: 20px;
+            border-radius: 15px;
+            width: 450px;
+        }
+        #selector h2 { margin-bottom: 15px; }
+        #selector input {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        #selector button {
+            width: 100%;
+            padding: 12px;
+            background: #486ddb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        #selector button:hover { background: #5a7de8; }
+        #selector button:disabled { background: #666; cursor: wait; }
+        
+        #games-list {
+            max-height: 450px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .game-item {
+            background: rgba(255,255,255,0.1);
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .game-item:hover { background: rgba(255,255,255,0.2); }
+        .game-item .players { font-weight: bold; }
+        .game-item .details { font-size: 12px; color: #aaa; margin-top: 5px; }
+        
+        /* Viewer */
+        #viewer {
+            background: #754840;
+            padding: 20px;
+            border-radius: 15px;
+            display: none;
+            max-width: 600px;
+        }
+        #viewer.active { display: block; }
+        
+        #game-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        .player-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .color-square {
+            width: 20px; height: 20px;
+            border-radius: 4px;
+            border: 2px solid #999;
+        }
+        .color-square.white { background: white; }
+        .color-square.black { background: #333; }
+        
+        #board-container {
+            display: block;
+        }
+        #board-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        #chessboard {
+            display: grid;
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
+            border: 3px solid #333;
+            border-radius: 4px;
+        }
+        .square {
+            width: 60px; height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 45px;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .square.light { background: #dEc5a6; }
+        .square.dark { background: #486ddb; }
+        .square.selected { background: #7fff7f !important; }
+        .square.red-highlight { background: rgba(255, 0, 0, 0.5) !important; }
+        .square.last-move { background: rgba(100, 200, 100, 0.5) !important; }
+        .square.legal-move::after {
+            content: '';
+            width: 15px; height: 15px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 50%;
+            position: absolute;
+        }
+        .square.legal-capture {
+            box-shadow: inset 0 0 0 4px rgba(255,0,0,0.5);
+        }
+        /* Couleurs des pièces */
+        .square.white-piece { color: #fff; text-shadow: 1px 1px 2px #000, -1px -1px 2px #000; }
+        .square.black-piece { color: #222; text-shadow: 1px 1px 1px #666; }
+        
+        /* Flèches SVG */
+        #arrows-svg {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .arrow-line {
+            stroke: #ffa500;
+            stroke-width: 8;
+            stroke-linecap: round;
+            fill: none;
+            opacity: 0.8;
+        }
+        .arrow-head {
+            fill: #ffa500;
+            opacity: 0.8;
+        }
+        /* Flèches Stockfish */
+        .stockfish-arrow-1 .arrow-line { stroke: #22aa22; }
+        .stockfish-arrow-1 .arrow-head { fill: #22aa22; }
+        .stockfish-arrow-2 .arrow-line { stroke: #66cc66; opacity: 0.6; }
+        .stockfish-arrow-2 .arrow-head { fill: #66cc66; opacity: 0.6; }
+        
+        .captured-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 30px;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #captured-top-row {
+            margin-bottom: 8px;
+        }
+        #captured-bottom-row {
+            margin-top: 8px;
+        }
+        .captured-pieces { 
+            font-size: 20px; 
+            flex-grow: 1;
+        }
+        .captured-pieces .white-captured { 
+            color: #fff; 
+            text-shadow: 1px 1px 2px #000, -1px -1px 2px #000;
+        }
+        .captured-pieces .black-captured { 
+            color: #222; 
+            text-shadow: 1px 1px 1px #888;
+        }
+        .material-diff {
+            background: #7f7;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        #controls {
+            display: flex;
+            gap: 8px;
+            margin-top: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        #controls button {
+            padding: 8px 15px;
+            font-size: 14px;
+            background: #486ddb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        #controls button:hover { background: #5a7de8; }
+        #controls button:disabled { background: #666; cursor: not-allowed; }
+        #controls button.play-mode { background: #2a2; }
+        
+        /* Classification des coups */
+        #move-quality {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin: 10px 0;
+            font-size: 14px;
+            min-height: 28px;
+        }
+        .quality-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .quality-brilliant { background: #1baca6; color: #fff; }
+        .quality-great { background: #5c9ccc; color: #fff; }
+        .quality-best { background: #96bc4b; color: #fff; }
+        .quality-excellent { background: #96bc4b; color: #fff; }
+        .quality-good { background: #a0c35a; color: #fff; }
+        .quality-book { background: #a88b5a; color: #fff; }
+        .quality-inaccuracy { background: #f7c631; color: #000; }
+        .quality-mistake { background: #e6912c; color: #fff; }
+        .quality-miss { background: #9b59b6; color: #fff; }
+        .quality-blunder { background: #ca3431; color: #fff; }
+        .quality-forced { background: #888; color: #fff; }
+        .quality-none { background: transparent; }
+        
+        #move-info {
+            text-align: center;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
+        #back-btn {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: #555;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        #back-btn:hover { background: #666; }
+        
+        /* Keyboard shortcuts hint */
+        #shortcuts {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #aaa;
+            text-align: center;
+        }
+        
+        /* Stockfish Analysis */
+        #analysis-panel {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+        #analysis-panel h3 {
+            margin-bottom: 10px;
+            color: #ffd700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #analysis-toggle {
+            padding: 5px 10px;
+            font-size: 12px;
+            background: #486ddb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #analysis-toggle.active { background: #2a2; }
+        #eval-bar-container {
+            width: 100%;
+            height: 25px;
+            background: #222;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        #eval-bar {
+            height: 100%;
+            background: #f0f0f0;
+            width: 50%;
+            transition: width 0.3s ease;
+        }
+        #eval-score {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px #000;
+        }
+        #best-moves {
+            font-size: 13px;
+        }
+        #best-moves .best-move {
+            background: rgba(255,255,255,0.1);
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #best-moves .best-move:first-child {
+            background: rgba(76, 175, 80, 0.3);
+            border-left: 3px solid #4CAF50;
+        }
+        #best-moves .move-notation { font-weight: bold; }
+        #best-moves .move-eval { color: #aaa; }
+        #analysis-status {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .depth-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .depth-selector label { font-size: 12px; color: #aaa; }
+        .depth-selector input {
+            width: 60px;
+            padding: 4px;
+            border-radius: 4px;
+            border: none;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <p id="loading-text">Chargement de Python...</p>
+    </div>
+    
+    <h1>♔ Chess Plus ♚</h1>
+    
+    <div id="app">
+        <!-- Sélecteur de parties -->
+        <div id="selector">
+            <h2>🔍 Rechercher des parties</h2>
+            <input type="text" id="username" placeholder="Nom d'utilisateur Chess.com">
+            <button id="search-btn">Rechercher</button>
+            <div id="games-list"></div>
+        </div>
+        
+        <!-- Viewer -->
+        <div id="viewer">
+            <div id="game-info">
+                <div class="player-info">
+                    <div class="color-square white"></div>
+                    <span id="white-player">Blancs</span>
+                </div>
+                <div id="result">-</div>
+                <div class="player-info">
+                    <span id="black-player">Noirs</span>
+                    <div class="color-square black"></div>
+                </div>
+            </div>
+            
+            <div id="board-container">
+                <!-- Captures du joueur du haut (adversaire) -->
+                <div id="captured-top-row" class="captured-row">
+                    <span id="captured-top" class="captured-pieces"></span>
+                    <span id="material-diff-top" class="material-diff" style="display:none;"></span>
+                </div>
+                
+                <div id="board-wrapper">
+                    <div id="chessboard"></div>
+                    <svg id="arrows-svg"></svg>
+                </div>
+                
+                <!-- Captures du joueur du bas (moi) -->
+                <div id="captured-bottom-row" class="captured-row">
+                    <span id="captured-bottom" class="captured-pieces"></span>
+                    <span id="material-diff-bottom" class="material-diff" style="display:none;"></span>
+                </div>
+            </div>
+            
+            <div id="controls">
+                <button id="btn-start" title="Début">|&lt;</button>
+                <button id="btn-prev" title="Coup précédent">&lt;</button>
+                <button id="btn-next" title="Coup suivant">&gt;</button>
+                <button id="btn-end" title="Fin">&gt;|</button>
+                <button id="btn-play" title="Mode jeu">Jouer</button>
+                <button id="btn-flip" title="Retourner l'échiquier">↻</button>
+            </div>
+            
+            <div id="move-info">Coup 0 / 0</div>
+            <div id="move-quality"></div>
+            <div id="shortcuts">← → pour naviguer • Clic droit: flèches/cases rouges • C pour effacer</div>
+            
+            <!-- Panneau d'analyse Stockfish 17.1 -->
+            <div id="analysis-panel">
+                <h3>🔬 Stockfish 17.1 <button id="analysis-toggle">Activer</button></h3>
+                <div class="depth-selector">
+                    <label>Profondeur:</label>
+                    <input type="number" id="depth-input" value="18" min="10" max="30">
+                </div>
+                <div id="eval-bar-container">
+                    <div id="eval-bar"></div>
+                    <span id="eval-score">0.0</span>
+                </div>
+                <div id="best-moves">
+                    <div class="best-move"><span class="move-notation">-</span><span class="move-eval">-</span></div>
+                    <div class="best-move"><span class="move-notation">-</span><span class="move-eval">-</span></div>
+                    <div class="best-move"><span class="move-notation">-</span><span class="move-eval">-</span></div>
+                </div>
+                <div id="analysis-status">Stockfish prêt</div>
+            </div>
+            
+            <button id="back-btn">← Retour aux parties</button>
+        </div>
+    </div>
+    
+    <!-- Pyodide pour Python -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <script>
+        // Helper: convertit boolean JS en Python
+        const pyBool = (b) => b ? 'True' : 'False';
+        
+        // Variables globales
+        let pyodide = null;
+        let chess = null;
+        let currentGame = null;
+        let moves = [];
+        let moveIndex = 0;
+        let board = null;
+        let playMode = false;
+        let savedMoveIndex = 0;
+        let selectedSquare = null;
+        let flipped = false;
+        let username = '';
+        let lastMove = null; // {from: 'e2', to: 'e4'}
+        
+        // Flèches et cases rouges
+        let arrows = [];
+        let redSquares = [];
+        let rightClickStart = null;
+        let isDraggingRight = false;
+        
+        // Stockfish
+        let stockfish = null;
+        let analysisEnabled = false;
+        let currentAnalysis = { score: 0, bestMoves: [], fen: '' };
+        let previousAnalysis = { score: 0, bestMoves: [], fen: '' }; // Analyse du coup précédent
+        let stockfishReady = false;
+        let lastAnalyzedFen = ''; // FEN de la dernière position analysée
+        let moveEvaluations = []; // Stocke les évaluations pour chaque coup [{ eval: 0.5, quality: {...} }, ...]
+        
+        // Initialiser Stockfish 17.1 (lite-single version avec NNUE)
+        function initStockfish() {
+            document.getElementById('analysis-status').textContent = 'Chargement Stockfish 17.1...';
+            
+            // Stockfish 17.1 lite-single (single-threaded, ~7MB, compatible sans headers CORS)
+            // Utilisation de unpkg car jsdelivr bloque certains fichiers
+            const baseUrl = 'https://unpkg.com/stockfish@17.1.0/src/';
+            const jsFile = 'stockfish-17.1-lite-single-03e3232.js';
+            const wasmFile = 'stockfish-17.1-lite-single-03e3232.wasm';
+            
+            // Charger le JS et le WASM via fetch
+            Promise.all([
+                fetch(baseUrl + jsFile).then(r => {
+                    if (!r.ok) throw new Error('JS fetch failed: ' + r.status);
+                    return r.text();
+                }),
+                fetch(baseUrl + wasmFile).then(r => {
+                    if (!r.ok) throw new Error('WASM fetch failed: ' + r.status);
+                    return r.arrayBuffer();
+                })
+            ]).then(([jsCode, wasmBuffer]) => {
+                console.log('Stockfish 17.1: JS et WASM chargés (' + (wasmBuffer.byteLength / 1024 / 1024).toFixed(1) + ' MB), création du Worker...');
+                
+                // Créer un Worker avec le WASM pré-injecté AVANT le code Stockfish
+                // On encode le WASM en base64 et on l'injecte directement
+                const wasmArray = new Uint8Array(wasmBuffer);
+                let wasmBase64 = '';
+                const chunkSize = 32768;
+                for (let i = 0; i < wasmArray.length; i += chunkSize) {
+                    const chunk = wasmArray.subarray(i, i + chunkSize);
+                    wasmBase64 += String.fromCharCode.apply(null, chunk);
+                }
+                wasmBase64 = btoa(wasmBase64);
+                
+                const workerCode = `
+                    // Décoder le WASM injecté
+                    const wasmBase64 = "${wasmBase64}";
+                    const wasmBinaryString = atob(wasmBase64);
+                    const wasmBinary = new Uint8Array(wasmBinaryString.length);
+                    for (let i = 0; i < wasmBinaryString.length; i++) {
+                        wasmBinary[i] = wasmBinaryString.charCodeAt(i);
+                    }
+                    console.log('WASM décodé:', wasmBinary.length, 'bytes');
+                    
+                    // Sauvegarder les originaux
+                    const originalInstantiate = WebAssembly.instantiate.bind(WebAssembly);
+                    
+                    // Override fetch - retourner immédiatement le WASM
+                    self.fetch = function(url, options) {
+                        console.log('fetch intercepté, retour WASM');
+                        return Promise.resolve(new Response(wasmBinary.buffer, {
+                            status: 200,
+                            headers: { 'Content-Type': 'application/wasm' }
+                        }));
+                    };
+                    
+                    // Override instantiateStreaming
+                    WebAssembly.instantiateStreaming = function(source, imports) {
+                        console.log('instantiateStreaming intercepté');
+                        return originalInstantiate(wasmBinary.buffer, imports);
+                    };
+                    
+                    // Override instantiate
+                    const origInstantiate = WebAssembly.instantiate;
+                    WebAssembly.instantiate = function(bufferOrModule, imports) {
+                        if (bufferOrModule instanceof ArrayBuffer || bufferOrModule instanceof Uint8Array) {
+                            console.log('instantiate intercepté, utilisation WASM injecté');
+                            return originalInstantiate(wasmBinary.buffer, imports);
+                        }
+                        return origInstantiate.call(WebAssembly, bufferOrModule, imports);
+                    };
+                    
+                    // Handler pour les messages UCI
+                    let stockfishOnMessage = null;
+                    Object.defineProperty(self, 'onmessage', {
+                        set: function(handler) {
+                            stockfishOnMessage = handler;
+                        },
+                        get: function() {
+                            return stockfishOnMessage;
+                        }
+                    });
+                    
+                    self.addEventListener('message', function(e) {
+                        if (typeof e.data === 'string' && stockfishOnMessage) {
+                            stockfishOnMessage(e);
+                        }
+                    });
+                    
+                    // Code Stockfish
+                    ${jsCode}
+                `;
+                
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                stockfish = new Worker(workerUrl);
+                
+                stockfish.onmessage = function(event) {
+                    const line = event.data;
+                    if (typeof line !== 'string') return;
+                    
+                    console.log('Stockfish 17.1:', line);
+                    
+                    if (line === 'uciok') {
+                        stockfish.postMessage('setoption name MultiPV value 3');
+                        stockfish.postMessage('isready');
+                    }
+                    
+                    if (line === 'readyok') {
+                        stockfishReady = true;
+                        console.log('Stockfish 17.1 prêt avec NNUE!');
+                        document.getElementById('analysis-status').textContent = 'Prêt (SF 17.1 NNUE)';
+                        if (analysisEnabled && board) {
+                            analyzePosition();
+                        }
+                    }
+                    
+                    if (line.startsWith('info depth')) {
+                        parseStockfishInfo(line);
+                    }
+                    
+                    if (line.startsWith('bestmove')) {
+                        document.getElementById('analysis-status').textContent = 'Analyse terminée';
+                    }
+                };
+                
+                stockfish.onerror = function(e) {
+                    console.error('Erreur Stockfish 17.1 Worker:', e);
+                    console.log('Fallback vers Stockfish 10...');
+                    initStockfishFallback();
+                };
+                
+                // Envoyer UCI après un petit délai pour laisser le temps au WASM d'être traité
+                setTimeout(() => {
+                    stockfish.postMessage('uci');
+                }, 200);
+                
+            }).catch(err => {
+                console.error('Erreur chargement Stockfish 17.1:', err);
+                console.log('Fallback vers Stockfish 10...');
+                initStockfishFallback();
+            });
+        }
+        
+        // Fallback vers Stockfish 10 si 17.1 ne fonctionne pas
+        function initStockfishFallback() {
+            try {
+                document.getElementById('analysis-status').textContent = 'Chargement Stockfish (fallback)...';
+                
+                const stockfishUrl = 'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js';
+                
+                fetch(stockfishUrl)
+                    .then(response => response.text())
+                    .then(code => {
+                        const blob = new Blob([code], { type: 'application/javascript' });
+                        const workerUrl = URL.createObjectURL(blob);
+                        stockfish = new Worker(workerUrl);
+                        
+                        stockfish.onmessage = function(event) {
+                            const line = event.data;
+                            console.log('Stockfish 10:', line);
+                            
+                            if (line === 'uciok') {
+                                stockfish.postMessage('setoption name MultiPV value 3');
+                                stockfish.postMessage('isready');
+                            }
+                            
+                            if (line === 'readyok') {
+                                stockfishReady = true;
+                                document.getElementById('analysis-status').textContent = 'Prêt (SF 10)';
+                                if (analysisEnabled && board) {
+                                    analyzePosition();
+                                }
+                            }
+                            
+                            if (line.startsWith('info depth')) {
+                                parseStockfishInfo(line);
+                            }
+                            
+                            if (line.startsWith('bestmove')) {
+                                document.getElementById('analysis-status').textContent = 'Analyse terminée';
+                            }
+                        };
+                        
+                        stockfish.onerror = function(e) {
+                            console.error('Erreur Stockfish Worker (fallback):', e);
+                            document.getElementById('analysis-status').textContent = 'Erreur chargement';
+                        };
+                        
+                        stockfish.postMessage('uci');
+                    })
+                    .catch(err => {
+                        console.error('Erreur chargement Stockfish fallback:', err);
+                        document.getElementById('analysis-status').textContent = 'Erreur: ' + err.message;
+                    });
+            } catch (e) {
+                console.error('Erreur init Stockfish fallback:', e);
+                document.getElementById('analysis-status').textContent = 'Erreur: ' + e.message;
+            }
+        }
+        
+        // Parser la sortie de Stockfish
+        function parseStockfishInfo(line) {
+            const depthMatch = line.match(/depth (\d+)/);
+            const scoreMatch = line.match(/score (cp|mate) (-?\d+)/);
+            // Utiliser " pv " avec espaces pour éviter de matcher "multipv"
+            const pvMatch = line.match(/ pv (.+)/);
+            const multipvMatch = line.match(/multipv (\d+)/);
+            
+            if (!scoreMatch || !pvMatch) return;
+            
+            const depth = depthMatch ? parseInt(depthMatch[1]) : 0;
+            const scoreType = scoreMatch[1];
+            let scoreValue = parseInt(scoreMatch[2]);
+            const pv = pvMatch[1].split(' ');
+            const multipv = multipvMatch ? parseInt(multipvMatch[1]) : 1;
+            
+            console.log(`Parsing multipv=${multipv}, pv=`, pv.slice(0, 3));
+            
+            // Convertir le score
+            let displayScore;
+            if (scoreType === 'mate') {
+                displayScore = scoreValue > 0 ? `M${scoreValue}` : `-M${Math.abs(scoreValue)}`;
+                scoreValue = scoreValue > 0 ? 10000 : -10000;
+            } else {
+                // Score en centipawns, convertir en pawns
+                displayScore = (scoreValue / 100).toFixed(1);
+                if (scoreValue > 0) displayScore = '+' + displayScore;
+            }
+            
+            // Ajuster selon le tour
+            const boardFen = board ? board.fen() : '';
+            const isBlackTurn = boardFen.includes(' b ');
+            if (isBlackTurn) {
+                scoreValue = -scoreValue;
+                if (scoreType === 'cp') {
+                    displayScore = (-parseFloat(displayScore)).toFixed(1);
+                    if (parseFloat(displayScore) > 0) displayScore = '+' + displayScore;
+                }
+            }
+            
+            // Stocker les meilleurs coups
+            if (multipv <= 3) {
+                if (!currentAnalysis.bestMoves[multipv - 1]) {
+                    currentAnalysis.bestMoves[multipv - 1] = {};
+                }
+                currentAnalysis.bestMoves[multipv - 1] = {
+                    moves: pv.slice(0, 3),
+                    score: displayScore,
+                    depth: depth
+                };
+                // Stocker le FEN de la position analysée
+                currentAnalysis.fen = board ? board.fen() : '';
+            }
+            
+            // Mettre à jour l'affichage
+            if (multipv === 1) {
+                currentAnalysis.score = scoreValue / 100;
+                updateEvalDisplay(displayScore, scoreValue);
+                
+                // Calculer la qualité du coup si on a l'évaluation précédente
+                if (moveIndex > 0 && moveEvaluations[moveIndex] && moveEvaluations[moveIndex].evalBefore !== undefined) {
+                    const evalBefore = moveEvaluations[moveIndex].evalBefore;
+                    const evalAfter = currentAnalysis.score;
+                    const wasWhiteTurn = moveEvaluations[moveIndex].wasWhiteTurn;
+                    
+                    // Vérifier si c'était un coup forcé (un seul coup légal)
+                    let wasOnlyLegalMove = false;
+                    let bestMoveWasPlayed = false;
+                    let wasSacrifice = false;
+                    
+                    try {
+                        const prevFen = pyodide.runPython(`get_position_at_move(${JSON.stringify(moves)}, ${moveIndex - 1})`);
+                        const legalMovesCount = pyodide.runPython(`len(list(chess.Board("${prevFen}").legal_moves))`);
+                        wasOnlyLegalMove = (legalMovesCount === 1);
+                        
+                        // Vérifier si le coup joué était le meilleur coup de Stockfish
+                        if (previousAnalysis.bestMoves && previousAnalysis.bestMoves.length > 0) {
+                            const bestMoveUci = previousAnalysis.bestMoves[0].moves[0];
+                            const playedMove = moves[moveIndex - 1];
+                            
+                            // Convertir le meilleur coup UCI en SAN pour comparer
+                            try {
+                                const bestMoveSan = pyodide.runPython(`convert_uci_to_san("${prevFen}", ["${bestMoveUci}"])`);
+                                bestMoveWasPlayed = (bestMoveSan.trim() === playedMove.trim());
+                            } catch (e) {}
+                            
+                            // Vérifier si c'était un sacrifice (capture de notre pièce après notre coup)
+                            // Simplifié: on considère sacrifice si on donne du matériel mais améliore l'éval
+                            try {
+                                const materialBefore = pyodide.runPython(`
+board = chess.Board("${prevFen}")
+sum(v for p, v in {'P':1,'N':3,'B':3,'R':5,'Q':9,'p':-1,'n':-3,'b':-3,'r':-5,'q':-9}.items() 
+    for sq in chess.SQUARES if board.piece_at(sq) and board.piece_at(sq).symbol() == p)
+                                `);
+                                const currentFen = board ? board.fen() : '';
+                                const materialAfter = pyodide.runPython(`
+board = chess.Board("${currentFen}")
+sum(v for p, v in {'P':1,'N':3,'B':3,'R':5,'Q':9,'p':-1,'n':-3,'b':-3,'r':-5,'q':-9}.items() 
+    for sq in chess.SQUARES if board.piece_at(sq) and board.piece_at(sq).symbol() == p)
+                                `);
+                                // Sacrifice si on a perdu du matériel mais l'éval s'est améliorée
+                                const materialLoss = wasWhiteTurn ? (materialBefore - materialAfter) : (materialAfter - materialBefore);
+                                const evalImproved = wasWhiteTurn ? (evalAfter > evalBefore) : (evalAfter < evalBefore);
+                                wasSacrifice = materialLoss > 0 && evalImproved;
+                            } catch (e) {}
+                        }
+                    } catch (e) {
+                        console.error('Erreur analyse coup:', e);
+                    }
+                    
+                    const quality = classifyMove(evalBefore, evalAfter, wasWhiteTurn, wasOnlyLegalMove, bestMoveWasPlayed, wasSacrifice);
+                    moveEvaluations[moveIndex].evalAfter = evalAfter;
+                    moveEvaluations[moveIndex].quality = quality;
+                    
+                    updateMoveQualityDisplay();
+                }
+            }
+            
+            updateBestMovesDisplay();
+            drawArrows(); // Redessiner les flèches Stockfish
+            document.getElementById('analysis-status').textContent = `Profondeur: ${depth}`;
+        }
+        
+        // Mettre à jour la barre d'évaluation
+        function updateEvalDisplay(displayScore, scoreValue) {
+            const evalBar = document.getElementById('eval-bar');
+            const evalScore = document.getElementById('eval-score');
+            
+            // Calculer le pourcentage (50% = égal, 0% = noir gagne, 100% = blanc gagne)
+            // scoreValue est en centipawns, utiliser une fonction sigmoïde pour limiter les extrêmes
+            // Diviser par 100 pour avoir des pions, puis appliquer tanh
+            const pawnScore = scoreValue / 100;
+            const percentage = 50 + (Math.tanh(pawnScore / 4) * 50);
+            
+            evalBar.style.width = percentage + '%';
+            evalScore.textContent = displayScore;
+            
+            // Couleur du texte selon la position (le texte doit être visible sur le fond)
+            if (percentage > 55) {
+                evalScore.style.color = '#000';
+                evalScore.style.textShadow = 'none';
+            } else if (percentage < 45) {
+                evalScore.style.color = '#fff';
+                evalScore.style.textShadow = 'none';
+            } else {
+                evalScore.style.color = '#fff';
+                evalScore.style.textShadow = '1px 1px 2px #000, -1px -1px 2px #000';
+            }
+        }
+        
+        // Classifier la qualité d'un coup basé sur la perte d'évaluation
+        function classifyMove(evalBefore, evalAfter, isWhiteTurn, wasOnlyLegalMove, bestMoveWasPlayed, wasSacrifice) {
+            // evalBefore et evalAfter sont en pions (pas centipawns)
+            // Positif = avantage blanc, négatif = avantage noir
+            
+            // Si c'était le seul coup légal
+            if (wasOnlyLegalMove) {
+                return { quality: 'forced', label: 'Forcé', icon: '●' };
+            }
+            
+            // Calculer la perte du point de vue du joueur qui a joué
+            let evalLoss;
+            if (isWhiteTurn) {
+                // Les blancs viennent de jouer
+                evalLoss = evalBefore - evalAfter;
+            } else {
+                // Les noirs viennent de jouer
+                evalLoss = evalAfter - evalBefore;
+            }
+            
+            // Détecter si c'était une opportunité manquée (grande amélioration possible mais pas prise)
+            const missedOpportunity = evalLoss > 1.5 && Math.abs(evalBefore) > 2.0;
+            
+            // Classification très optimiste - seuils très indulgents
+            if (evalLoss <= 0 && wasSacrifice) {
+                // Brillant: sacrifice de matériel + amélioration
+                return { quality: 'brilliant', label: 'Brillant', icon: '!!' };
+            } else if (evalLoss <= 0 && bestMoveWasPlayed) {
+                // Meilleur coup: exactement le coup #1 du moteur
+                return { quality: 'best', label: 'Meilleur', icon: '✓' };
+            } else if (evalLoss <= 0.05) {
+                // Grand coup: coup crucial (perte < 0.05)
+                return { quality: 'great', label: 'Grand', icon: '!' };
+            } else if (evalLoss <= 0.2) {
+                // Excellent: quasi identique au meilleur
+                return { quality: 'excellent', label: 'Excellent', icon: '✓' };
+            } else if (evalLoss <= 0.5) {
+                // Bon: jouable, petite perte
+                return { quality: 'good', label: 'Bon', icon: '✓' };
+            } else if (evalLoss <= 1.2) {
+                // Imprécision: affaiblit légèrement
+                return { quality: 'inaccuracy', label: 'Imprécision', icon: '?!' };
+            } else if (missedOpportunity) {
+                // Manqué: opportunité tactique ratée
+                return { quality: 'miss', label: 'Manqué', icon: '✕' };
+            } else if (evalLoss <= 2.5) {
+                // Erreur: dégrade sensiblement
+                return { quality: 'mistake', label: 'Erreur', icon: '?' };
+            } else {
+                // Gaffe: pire erreur possible (>2.5 pions)
+                return { quality: 'blunder', label: 'Gaffe', icon: '??' };
+            }
+        }
+        
+        // Mettre à jour l'affichage de la qualité du coup
+        function updateMoveQualityDisplay() {
+            const container = document.getElementById('move-quality');
+            
+            if (!analysisEnabled || moveIndex === 0 || !moveEvaluations[moveIndex]) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            const evalData = moveEvaluations[moveIndex];
+            if (evalData && evalData.quality) {
+                const q = evalData.quality;
+                container.innerHTML = `
+                    <span class="quality-badge quality-${q.quality}">
+                        ${q.icon ? q.icon + ' ' : ''}${q.label}
+                    </span>
+                    <span style="opacity: 0.7;">${moves[moveIndex - 1]}</span>
+                `;
+            } else {
+                container.innerHTML = '';
+            }
+        }
+        
+        // Afficher les meilleurs coups
+        function updateBestMovesDisplay() {
+            const container = document.getElementById('best-moves');
+            const moveElements = container.querySelectorAll('.best-move');
+            
+            currentAnalysis.bestMoves.forEach((analysis, i) => {
+                if (moveElements[i] && analysis.moves) {
+                    // Convertir UCI en SAN via Python
+                    const boardFen = board ? board.fen() : '';
+                    try {
+                        const sanMoves = pyodide.runPython(`
+uci_moves = ${JSON.stringify(analysis.moves)}
+fen = "${boardFen}"
+convert_uci_to_san(fen, uci_moves)
+                        `);
+                        moveElements[i].querySelector('.move-notation').textContent = sanMoves;
+                    } catch (e) {
+                        moveElements[i].querySelector('.move-notation').textContent = analysis.moves.join(' ');
+                    }
+                    moveElements[i].querySelector('.move-eval').textContent = analysis.score;
+                }
+            });
+        }
+        
+        // Lancer l'analyse
+        function analyzePosition() {
+            if (!analysisEnabled || !stockfish || !board) return;
+            
+            if (!stockfishReady) {
+                document.getElementById('analysis-status').textContent = 'Chargement Stockfish...';
+                return;
+            }
+            
+            const fen = board.fen();
+            const depth = parseInt(document.getElementById('depth-input').value) || 18;
+            
+            // Réinitialiser
+            currentAnalysis = { score: 0, bestMoves: [] };
+            
+            // Arrêter l'analyse précédente et lancer la nouvelle
+            stockfish.postMessage('stop');
+            stockfish.postMessage('position fen ' + fen);
+            stockfish.postMessage('go depth ' + depth);
+            
+            document.getElementById('analysis-status').textContent = 'Analyse en cours...';
+        }
+        
+        // Toggle analyse
+        function toggleAnalysis() {
+            analysisEnabled = !analysisEnabled;
+            const btn = document.getElementById('analysis-toggle');
+            
+            if (analysisEnabled) {
+                btn.textContent = 'Désactiver';
+                btn.classList.add('active');
+                if (!stockfish) initStockfish();
+                analyzePosition();
+            } else {
+                btn.textContent = 'Activer';
+                btn.classList.remove('active');
+                if (stockfish) stockfish.postMessage('stop');
+                document.getElementById('analysis-status').textContent = 'Analyse désactivée';
+            }
+        }
+        
+        // Charger le username sauvegardé
+        const savedUsername = localStorage.getItem('chess_plus_username');
+        if (savedUsername) {
+            document.getElementById('username').value = savedUsername;
+        }
+        
+        // Initialisation Pyodide
+        async function initPyodide() {
+            try {
+                document.getElementById('loading-text').textContent = 'Chargement de Python...';
+                pyodide = await loadPyodide();
+                
+                document.getElementById('loading-text').textContent = 'Installation de micropip...';
+                await pyodide.loadPackage('micropip');
+                
+                document.getElementById('loading-text').textContent = 'Installation de python-chess...';
+                const micropip = pyodide.pyimport('micropip');
+                await micropip.install('chess');
+                
+                chess = pyodide.pyimport('chess');
+                
+                // Charger le fichier chess_logic.py
+                document.getElementById('loading-text').textContent = 'Chargement des fonctions...';
+                const response = await fetch('chess_logic.py');
+                const pythonCode = await response.text();
+                pyodide.runPython(pythonCode);
+                
+                document.getElementById('loading').classList.add('hidden');
+                console.log('Python, chess et chess_logic chargés !');
+                
+                // Auto-recherche si username sauvegardé
+                if (savedUsername) {
+                    searchGames();
+                }
+            } catch (e) {
+                document.getElementById('loading-text').textContent = 'Erreur: ' + e.message;
+                console.error(e);
+            }
+        }
+        
+        // Créer l'échiquier HTML
+        function createBoard() {
+            const boardEl = document.getElementById('chessboard');
+            boardEl.innerHTML = '';
+            
+            // Générer les cases via Python
+            const squares = pyodide.runPython(`get_board_squares(${pyBool(flipped)})`).toJs();
+            
+            for (const sq of squares) {
+                const square = document.createElement('div');
+                const squareName = sq.get('square');
+                const isLight = sq.get('is_light');
+                
+                square.className = `square ${isLight ? 'light' : 'dark'}`;
+                square.dataset.square = squareName;
+                square.addEventListener('click', () => onSquareClick(squareName));
+                boardEl.appendChild(square);
+            }
+        }
+        
+        // Mettre à jour l'affichage du plateau
+        function updateBoard() {
+            if (!board) return;
+            
+            const boardFen = board.fen();
+            
+            document.querySelectorAll('.square').forEach(sq => {
+                sq.textContent = '';
+                sq.classList.remove('selected', 'legal-move', 'legal-capture', 'white-piece', 'black-piece', 'red-highlight', 'last-move');
+            });
+            
+            // Surligner le dernier coup
+            if (lastMove) {
+                const fromEl = document.querySelector(`[data-square="${lastMove.from}"]`);
+                const toEl = document.querySelector(`[data-square="${lastMove.to}"]`);
+                if (fromEl) fromEl.classList.add('last-move');
+                if (toEl) toEl.classList.add('last-move');
+            }
+            
+            // Afficher les cases rouges
+            for (const sq of redSquares) {
+                const el = document.querySelector(`[data-square="${sq}"]`);
+                if (el) el.classList.add('red-highlight');
+            }
+            
+            // Placer les pièces via Python
+            try {
+                const pieces = pyodide.runPython(`get_board_pieces("${boardFen}")`).toJs();
+                for (const p of pieces) {
+                    const squareEl = document.querySelector(`[data-square="${p.get('square')}"]`);
+                    if (squareEl) {
+                        squareEl.textContent = p.get('symbol');
+                        squareEl.classList.add(p.get('is_white') ? 'white-piece' : 'black-piece');
+                    }
+                }
+            } catch (e) {
+                console.error('Erreur placement pièces:', e);
+            }
+            
+            // Dessiner les flèches
+            drawArrows();
+            
+            // Surligner la case sélectionnée et les coups légaux
+            if (selectedSquare && playMode) {
+                const selectedEl = document.querySelector(`[data-square="${selectedSquare}"]`);
+                if (selectedEl) selectedEl.classList.add('selected');
+                
+                // Afficher les coups légaux via Python
+                try {
+                    const result = pyodide.runPython(`get_legal_moves("${boardFen}", "${selectedSquare}")`);
+                    const [moveTargets, captureTargets] = result.toJs();
+                    
+                    for (const sq of moveTargets) {
+                        const el = document.querySelector(`[data-square="${sq}"]`);
+                        if (el) el.classList.add('legal-move');
+                    }
+                    for (const sq of captureTargets) {
+                        const el = document.querySelector(`[data-square="${sq}"]`);
+                        if (el) el.classList.add('legal-capture');
+                    }
+                } catch (e) {
+                    console.error('Erreur legal moves:', e);
+                }
+            }
+            
+            updateCapturedPieces();
+            updateMoveInfo();
+            
+            // Analyser la position avec Stockfish si activé
+            if (analysisEnabled) {
+                analyzePosition();
+            }
+        }
+        
+        // Afficher les pièces capturées (logique en Python, affichage en JS)
+        function updateCapturedPieces() {
+            const boardFen = board.fen();
+            
+            try {
+                const display = pyodide.runPython(`get_captured_display("${boardFen}", ${pyBool(flipped)})`).toJs();
+                
+                const capturedTopEl = document.getElementById('captured-top');
+                const capturedBottomEl = document.getElementById('captured-bottom');
+                const diffTopEl = document.getElementById('material-diff-top');
+                const diffBottomEl = document.getElementById('material-diff-bottom');
+                
+                // Afficher les pièces capturées
+                capturedTopEl.innerHTML = `<span class="${display.get('top_class')}">${display.get('top_pieces')}</span>`;
+                capturedBottomEl.innerHTML = `<span class="${display.get('bottom_class')}">${display.get('bottom_pieces')}</span>`;
+                
+                // Afficher le différentiel de matériel
+                diffTopEl.style.display = display.get('show_diff_top') ? 'inline' : 'none';
+                diffBottomEl.style.display = display.get('show_diff_bottom') ? 'inline' : 'none';
+                
+                if (display.get('diff') > 0) {
+                    if (display.get('show_diff_top')) {
+                        diffTopEl.textContent = '+' + display.get('diff');
+                    }
+                    if (display.get('show_diff_bottom')) {
+                        diffBottomEl.textContent = '+' + display.get('diff');
+                    }
+                }
+            } catch (e) {
+                console.error('Erreur captured pieces:', e);
+            }
+        }
+        
+        // Clic sur une case
+        function onSquareClick(square) {
+            if (!playMode) return;
+            
+            const boardFen = board.fen();
+            
+            // Vérifier s'il y a une pièce sur la case
+            const hasPiece = pyodide.runPython(`has_piece("${boardFen}", "${square}")`);
+            
+            if (selectedSquare === null) {
+                if (hasPiece) {
+                    selectedSquare = square;
+                    updateBoard();
+                }
+            } else {
+                if (selectedSquare === square) {
+                    selectedSquare = null;
+                    updateBoard();
+                    return;
+                }
+                
+                // Essayer de jouer le coup
+                const result = pyodide.runPython(`try_move("${boardFen}", "${selectedSquare}", "${square}")`);
+                
+                if (result) {
+                    lastMove = { from: selectedSquare, to: square };
+                    board = chess.Board(result);
+                }
+                
+                selectedSquare = null;
+                updateBoard();
+            }
+        }
+        
+        // Navigation
+        function goToMove(index) {
+            if (playMode) {
+                playMode = false;
+                document.getElementById('btn-play').textContent = 'Jouer';
+                document.getElementById('btn-play').classList.remove('play-mode');
+            }
+            
+            const newIndex = Math.max(0, Math.min(moves.length, index));
+            const wasAdvancing = newIndex > moveIndex;
+            
+            // Sauvegarder l'analyse courante comme analyse précédente avant de changer de position
+            // Seulement si on avance et qu'il y a une analyse
+            if (wasAdvancing && currentAnalysis.bestMoves.length > 0) {
+                previousAnalysis = JSON.parse(JSON.stringify(currentAnalysis));
+                
+                // Calculer et stocker la qualité du coup si on avance d'un coup
+                if (newIndex === moveIndex + 1 && previousAnalysis.score !== undefined) {
+                    // On stockera l'évaluation après avoir analysé la nouvelle position
+                    // Pour l'instant, stocker l'eval avant le coup
+                    if (!moveEvaluations[newIndex]) {
+                        moveEvaluations[newIndex] = {};
+                    }
+                    moveEvaluations[newIndex].evalBefore = previousAnalysis.score;
+                    // Déterminer si c'était le tour des blancs (avant le coup)
+                    moveEvaluations[newIndex].wasWhiteTurn = (newIndex % 2 === 1);
+                }
+            } else if (newIndex < moveIndex) {
+                // Si on recule, effacer l'analyse précédente
+                previousAnalysis = { score: 0, bestMoves: [], fen: '' };
+            }
+            
+            moveIndex = newIndex;
+            
+            // Reconstruire le plateau via Python
+            const newFen = pyodide.runPython(`get_position_at_move(${JSON.stringify(moves)}, ${moveIndex})`);
+            
+            // Récupérer le dernier coup joué
+            const lastMoveResult = pyodide.runPython(`get_last_move(${JSON.stringify(moves)}, ${moveIndex})`);
+            if (lastMoveResult) {
+                const lm = lastMoveResult.toJs();
+                lastMove = { from: lm.get('from'), to: lm.get('to') };
+            } else {
+                lastMove = null;
+            }
+            
+            board = chess.Board(newFen);
+            selectedSquare = null;
+            
+            // Réinitialiser l'analyse courante pour la nouvelle position
+            currentAnalysis = { score: 0, bestMoves: [], fen: '' };
+            
+            updateBoard();
+        }
+        
+        function updateMoveInfo() {
+            let text = `Coup ${moveIndex} / ${moves.length}`;
+            if (playMode) {
+                text += ' - MODE JEU';
+            }
+            document.getElementById('move-info').textContent = text;
+            
+            document.getElementById('btn-start').disabled = moveIndex === 0;
+            document.getElementById('btn-prev').disabled = moveIndex === 0;
+            document.getElementById('btn-next').disabled = moveIndex >= moves.length;
+            document.getElementById('btn-end').disabled = moveIndex >= moves.length;
+            
+            // Afficher la qualité du coup si disponible
+            updateMoveQualityDisplay();
+        }
+        
+        // Charger une partie
+        async function loadGame(pgn) {
+            try {
+                board = chess.Board();
+                moves = [];
+                moveIndex = 0;
+                selectedSquare = null;
+                lastMove = null;
+                currentAnalysis = { score: 0, bestMoves: [], fen: '' };
+                previousAnalysis = { score: 0, bestMoves: [], fen: '' };
+                moveEvaluations = []; // Réinitialiser les évaluations
+                
+                // Parser le PGN complet avec Python (passer via globals pour éviter les problèmes d'échappement)
+                pyodide.globals.set('_pgn_text', pgn);
+                const gameData = pyodide.runPython(`parse_pgn_full(_pgn_text)`).toJs();
+                
+                moves = gameData.get('moves');
+                
+                // Afficher les infos des joueurs
+                const white = gameData.get('white');
+                const black = gameData.get('black');
+                const whiteElo = gameData.get('white_elo');
+                const blackElo = gameData.get('black_elo');
+                
+                document.getElementById('white-player').textContent = `${white} (${whiteElo})`;
+                document.getElementById('black-player').textContent = `${black} (${blackElo})`;
+                document.getElementById('result').textContent = gameData.get('result');
+                
+                // Orienter le plateau selon le joueur
+                flipped = username.toLowerCase() === black.toLowerCase();
+                
+                createBoard();
+                updateBoard();
+                
+                document.getElementById('selector').style.display = 'none';
+                document.getElementById('viewer').classList.add('active');
+            } catch (e) {
+                console.error('Erreur loadGame:', e);
+                alert('Erreur lors du chargement de la partie: ' + e.message);
+            }
+        }
+        
+        // Rechercher des parties
+        async function searchGames() {
+            const usernameInput = document.getElementById('username');
+            username = usernameInput.value.trim();
+            if (!username) return;
+            
+            // Sauvegarder le username
+            localStorage.setItem('chess_plus_username', username);
+            
+            const btn = document.getElementById('search-btn');
+            btn.disabled = true;
+            btn.textContent = 'Chargement...';
+            
+            const gamesList = document.getElementById('games-list');
+            gamesList.innerHTML = '<p>Recherche en cours...</p>';
+            
+            try {
+                // Récupérer les archives
+                const archivesRes = await fetch(`https://api.chess.com/pub/player/${username}/games/archives`);
+                if (!archivesRes.ok) {
+                    if (archivesRes.status === 404) {
+                        gamesList.innerHTML = `<p>Joueur "${username}" introuvable</p>`;
+                        return;
+                    }
+                    throw new Error(`HTTP ${archivesRes.status}`);
+                }
+                const archivesData = await archivesRes.json();
+                
+                if (!archivesData.archives || archivesData.archives.length === 0) {
+                    gamesList.innerHTML = '<p>Aucune partie trouvée</p>';
+                    return;
+                }
+                
+                // Récupérer le dernier mois
+                const lastArchive = archivesData.archives[archivesData.archives.length - 1];
+                const gamesRes = await fetch(lastArchive);
+                const gamesData = await gamesRes.json();
+                
+                // Parser les parties avec Python en passant l'objet directement
+                pyodide.globals.set('_games_data', gamesData);
+                const parsedGamesJson = pyodide.runPython(`
+import json
+result = parse_games_from_object(_games_data.to_py())
+json.dumps(result)
+                `);
+                const games = JSON.parse(parsedGamesJson);
+                
+                gamesList.innerHTML = '';
+                
+                if (games.length === 0) {
+                    gamesList.innerHTML = '<p>Aucune partie ce mois-ci</p>';
+                    return;
+                }
+                
+                // Affichage des parties (logique d'affichage en JS)
+                for (const game of games) {
+                    const div = document.createElement('div');
+                    div.className = 'game-item';
+                    
+                    div.innerHTML = `
+                        <div class="players">⚪ ${game.white} (${game.white_elo}) vs ⚫ ${game.black} (${game.black_elo})</div>
+                        <div class="details">${game.result} • ${game.time_class} • ${game.date} ${game.time}</div>
+                    `;
+                    div.addEventListener('click', () => loadGame(game.pgn));
+                    gamesList.appendChild(div);
+                }
+            } catch (e) {
+                gamesList.innerHTML = `<p>Erreur: ${e.message}</p>`;
+                console.error(e);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Rechercher';
+            }
+        }
+        
+        // Retourner l'échiquier
+        function flipBoard() {
+            flipped = !flipped;
+            createBoard();
+            updateBoard();
+        }
+        
+        // Event listeners
+        document.getElementById('search-btn').addEventListener('click', searchGames);
+        document.getElementById('username').addEventListener('keypress', e => {
+            if (e.key === 'Enter') searchGames();
+        });
+        
+        document.getElementById('btn-start').addEventListener('click', () => goToMove(0));
+        document.getElementById('btn-prev').addEventListener('click', () => goToMove(moveIndex - 1));
+        document.getElementById('btn-next').addEventListener('click', () => goToMove(moveIndex + 1));
+        document.getElementById('btn-end').addEventListener('click', () => goToMove(moves.length));
+        document.getElementById('btn-flip').addEventListener('click', flipBoard);
+        
+        document.getElementById('btn-play').addEventListener('click', () => {
+            playMode = !playMode;
+            const btn = document.getElementById('btn-play');
+            if (playMode) {
+                savedMoveIndex = moveIndex;
+                btn.textContent = 'Voir';
+                btn.classList.add('play-mode');
+            } else {
+                goToMove(savedMoveIndex);
+                btn.textContent = 'Jouer';
+                btn.classList.remove('play-mode');
+            }
+            selectedSquare = null;
+            updateBoard();
+        });
+        
+        document.getElementById('back-btn').addEventListener('click', () => {
+            document.getElementById('viewer').classList.remove('active');
+            document.getElementById('selector').style.display = 'block';
+            playMode = false;
+            selectedSquare = null;
+            document.getElementById('btn-play').textContent = 'Jouer';
+            document.getElementById('btn-play').classList.remove('play-mode');
+        });
+        
+        // Event listeners Stockfish
+        document.getElementById('analysis-toggle').addEventListener('click', toggleAnalysis);
+        document.getElementById('depth-input').addEventListener('change', () => {
+            if (analysisEnabled) analyzePosition();
+        });
+        
+        // Raccourcis clavier
+        document.addEventListener('keydown', e => {
+            if (document.getElementById('viewer').classList.contains('active')) {
+                if (e.key === 'ArrowLeft') {
+                    goToMove(moveIndex - 1);
+                } else if (e.key === 'ArrowRight') {
+                    goToMove(moveIndex + 1);
+                } else if (e.key === 'ArrowUp') {
+                    goToMove(0);
+                } else if (e.key === 'ArrowDown') {
+                    goToMove(moves.length);
+                } else if (e.key === 'Escape' || e.key === 'c' || e.key === 'C') {
+                    selectedSquare = null;
+                    arrows = [];
+                    redSquares = [];
+                    updateBoard();
+                } else if (e.key === 'f' || e.key === 'F') {
+                    flipBoard();
+                }
+            }
+        });
+        
+        // Fonction pour obtenir la case depuis les coordonnées souris
+        function getSquareFromPoint(x, y) {
+            const boardEl = document.getElementById('chessboard');
+            const rect = boardEl.getBoundingClientRect();
+            const col = Math.floor((x - rect.left) / 60);
+            const row = Math.floor((y - rect.top) / 60);
+            
+            if (col < 0 || col > 7 || row < 0 || row > 7) return null;
+            
+            // Utiliser Python pour la conversion
+            return pyodide.runPython(`get_square_from_visual(${col}, ${row}, ${pyBool(flipped)})`);
+        }
+        
+        // Fonction pour obtenir le centre d'une case en pixels
+        function getSquareCenter(sq) {
+            const result = pyodide.runPython(`get_square_center("${sq}", ${pyBool(flipped)})`).toJs();
+            return { x: result.get('x'), y: result.get('y') };
+        }
+        
+        // Dessiner les flèches
+        function drawArrows() {
+            const svg = document.getElementById('arrows-svg');
+            svg.innerHTML = '';
+            
+            // Déterminer quelle analyse afficher pour les flèches
+            // Si on a une analyse précédente (après avoir avancé), l'afficher
+            // Sinon, afficher l'analyse courante
+            let analysisToShow = null;
+            if (previousAnalysis.bestMoves && previousAnalysis.bestMoves.length > 0) {
+                analysisToShow = previousAnalysis;
+            } else if (currentAnalysis.bestMoves && currentAnalysis.bestMoves.length > 0) {
+                analysisToShow = currentAnalysis;
+            }
+            
+            // Dessiner les flèches Stockfish
+            if (analysisEnabled && analysisToShow && analysisToShow.bestMoves.length > 0) {
+                console.log('Dessin flèches Stockfish:', analysisToShow.bestMoves);
+                // Dessiner les 2 meilleurs coups (en ordre inverse pour que le meilleur soit au-dessus)
+                const maxArrows = Math.min(2, analysisToShow.bestMoves.length);
+                for (let i = maxArrows - 1; i >= 0; i--) {
+                    const analysis = analysisToShow.bestMoves[i];
+                    console.log(`Analysis ${i}:`, analysis);
+                    if (analysis && analysis.moves) {
+                        // S'assurer que moves est un tableau
+                        const movesArray = Array.isArray(analysis.moves) ? analysis.moves : Array.from(analysis.moves);
+                        console.log(`Moves array:`, movesArray);
+                        if (movesArray.length > 0) {
+                            const uciMove = movesArray[0]; // Premier coup de la ligne
+                            console.log(`Flèche ${i+1}: uciMove =`, uciMove, `type =`, typeof uciMove);
+                            if (uciMove && typeof uciMove === 'string' && uciMove.length >= 4) {
+                                const from = uciMove.substring(0, 2);
+                                const to = uciMove.substring(2, 4);
+                                console.log(`Dessin flèche de ${from} à ${to}`);
+                                drawStockfishArrow(svg, from, to, i + 1);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Dessiner les flèches utilisateur (orange) par-dessus
+            for (const [from, to] of arrows) {
+                const start = getSquareCenter(from);
+                const end = getSquareCenter(to);
+                
+                // Calculer l'angle
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const angle = Math.atan2(dy, dx);
+                
+                // Raccourcir la ligne pour laisser place à la tête
+                const headLen = 15;
+                const lineEndX = end.x - headLen * Math.cos(angle);
+                const lineEndY = end.y - headLen * Math.sin(angle);
+                
+                // Créer la ligne
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', start.x);
+                line.setAttribute('y1', start.y);
+                line.setAttribute('x2', lineEndX);
+                line.setAttribute('y2', lineEndY);
+                line.setAttribute('class', 'arrow-line');
+                svg.appendChild(line);
+                
+                // Créer la tête de flèche
+                const headAngle = Math.PI / 6;
+                const head = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const points = [
+                    `${end.x},${end.y}`,
+                    `${end.x - 20 * Math.cos(angle - headAngle)},${end.y - 20 * Math.sin(angle - headAngle)}`,
+                    `${end.x - 20 * Math.cos(angle + headAngle)},${end.y - 20 * Math.sin(angle + headAngle)}`
+                ].join(' ');
+                head.setAttribute('points', points);
+                head.setAttribute('class', 'arrow-head');
+                svg.appendChild(head);
+            }
+        }
+        
+        // Dessiner une flèche Stockfish
+        function drawStockfishArrow(svg, from, to, rank) {
+            console.log(`drawStockfishArrow: ${from} -> ${to}, rank=${rank}`);
+            
+            try {
+                const start = getSquareCenter(from);
+                const end = getSquareCenter(to);
+                
+                console.log(`Coordonnées: start=(${start.x}, ${start.y}), end=(${end.x}, ${end.y})`);
+                
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const angle = Math.atan2(dy, dx);
+                
+                const headLen = 15;
+                const lineEndX = end.x - headLen * Math.cos(angle);
+                const lineEndY = end.y - headLen * Math.sin(angle);
+                
+                // Groupe pour appliquer la classe CSS
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('class', `stockfish-arrow-${rank}`);
+                
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', start.x);
+                line.setAttribute('y1', start.y);
+                line.setAttribute('x2', lineEndX);
+                line.setAttribute('y2', lineEndY);
+                line.setAttribute('class', 'arrow-line');
+                group.appendChild(line);
+                
+                const headAngle = Math.PI / 6;
+                const head = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const points = [
+                    `${end.x},${end.y}`,
+                    `${end.x - 20 * Math.cos(angle - headAngle)},${end.y - 20 * Math.sin(angle - headAngle)}`,
+                    `${end.x - 20 * Math.cos(angle + headAngle)},${end.y - 20 * Math.sin(angle + headAngle)}`
+                ].join(' ');
+                head.setAttribute('points', points);
+                head.setAttribute('class', 'arrow-head');
+                group.appendChild(head);
+                
+                svg.appendChild(group);
+                console.log('Flèche ajoutée au SVG');
+            } catch (e) {
+                console.error('Erreur drawStockfishArrow:', e);
+            }
+        }
+        
+        // Gestion du clic droit sur l'échiquier
+        document.getElementById('chessboard').addEventListener('contextmenu', e => {
+            e.preventDefault();
+        });
+        
+        document.getElementById('chessboard').addEventListener('mousedown', e => {
+            if (e.button === 2) { // Clic droit
+                e.preventDefault();
+                const sq = getSquareFromPoint(e.clientX, e.clientY);
+                if (sq) {
+                    rightClickStart = sq;
+                    isDraggingRight = true;
+                }
+            }
+        });
+        
+        document.addEventListener('mouseup', e => {
+            if (e.button === 2 && isDraggingRight) { // Relâcher clic droit
+                e.preventDefault();
+                const sq = getSquareFromPoint(e.clientX, e.clientY);
+                
+                if (rightClickStart && sq) {
+                    if (rightClickStart === sq) {
+                        // Clic sur place = case rouge
+                        const idx = redSquares.indexOf(sq);
+                        if (idx >= 0) {
+                            redSquares.splice(idx, 1);
+                        } else {
+                            redSquares.push(sq);
+                        }
+                    } else {
+                        // Drag = flèche
+                        const arrowKey = `${rightClickStart}-${sq}`;
+                        const existingIdx = arrows.findIndex(a => `${a[0]}-${a[1]}` === arrowKey);
+                        if (existingIdx >= 0) {
+                            arrows.splice(existingIdx, 1);
+                        } else {
+                            arrows.push([rightClickStart, sq]);
+                        }
+                    }
+                    updateBoard();
+                }
+                
+                rightClickStart = null;
+                isDraggingRight = false;
+            }
+        });
+        
+        // Effacer les annotations au clic gauche
+        document.getElementById('chessboard').addEventListener('mousedown', e => {
+            if (e.button === 0) { // Clic gauche
+                if (arrows.length > 0 || redSquares.length > 0) {
+                    arrows = [];
+                    redSquares = [];
+                    updateBoard();
+                }
+            }
+        });
+        
+        // Démarrer
+        initPyodide();
+        initStockfish();
+    </script>
+</body>
+</html>
