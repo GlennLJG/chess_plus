@@ -62,21 +62,25 @@ def split_data_iterative(df, theme_col='theme_vector', train_size=train_split, v
 
 train_df, val_df, test_df = split_data_iterative(data)
 
+del data
+gc.collect()
 
 class ChessDataset(Dataset):
     def __init__(self, df):
-        # On convertit les colonnes en listes pour un accès rapide par index
-        # sans transformer les données en gros tenseurs tout de suite
-        self.puzzles = df['all_tensor'].to_list()
-        self.labels = df['theme_vector'].to_list()
+        # On ne convertit RIEN en liste. On garde le DataFrame tel quel.
+        # On s'assure juste qu'il est en mémoire (Polars le fait par défaut)
+        self.df = df 
 
     def __len__(self):
-        return len(self.labels)
+        return len(self.df)
 
     def __getitem__(self, idx):
-        # Conversion en tenseur au moment de l'appel
-        x = torch.as_tensor(self.puzzles[idx], dtype=torch.float32)
-        y = torch.as_tensor(self.labels[idx], dtype=torch.float32)
+        # On récupère la ligne uniquement quand on en a besoin
+        # .row(idx) est efficace, mais récupérer les colonnes directement l'est encore plus
+        row = self.df.row(idx, named=True)
+        
+        x = torch.as_tensor(row['all_tensor'], dtype=torch.float32)
+        y = torch.as_tensor(row['theme_vector'], dtype=torch.float32)
         return x, y
     
 def chess_collate_fn(batch):
@@ -100,7 +104,7 @@ val_ds   = ChessDataset(val_df)
 test_ds  = ChessDataset(test_df)
 
 # On peut maintenant supprimer les DataFrames pour libérer de la RAM
-del data, train_df, val_df, test_df
+del train_df, val_df, test_df
 gc.collect()
 
 # --- DATALOADERS ---
