@@ -77,7 +77,7 @@ def create_label_matrix(series, theme_map):
     num_rows = len(series)
     num_labels = len(theme_map)
     # On crée une matrice de zéros avec NumPy
-    matrix = np.zeros((num_rows, num_labels), dtype=np.int64)
+    matrix = np.zeros((num_rows, num_labels), dtype=np.int8)
     
     for i, themes in enumerate(series):
         for theme in themes:
@@ -98,12 +98,12 @@ final_data = final_data.with_columns(
 
 
 # --- CONSTANTES PRÉ-CALCULÉES ---
-_COORDS = np.array([[ (s % 8) / 7.0, (s // 8) / 7.0] for s in range(64)], dtype=np.float32)
-VAL_ARRAY = np.array([0, 1, 3, 3, 5, 9, 100], dtype=np.float32)
+_COORDS = np.array([[ (s % 8) / 7.0, (s // 8) / 7.0] for s in range(64)], dtype=np.float16)
+VAL_ARRAY = np.array([0, 1, 3, 3, 5, 9, 100], dtype=np.float16)
 
 def fast_create_position_tensor(board):
     """Calcule le tenseur (64, 20) pour l'état actuel du board."""
-    node_features = np.zeros((64, 10), dtype=np.float32)
+    node_features = np.zeros((64, 10), dtype=np.float16)
     node_features[:, 7:9] = _COORDS
     
     piece_map = board.piece_map()
@@ -144,7 +144,7 @@ def fast_create_position_tensor(board):
 
     # Influence Tactique
     nodes_t = torch.from_numpy(node_features)
-    tactical_influence = torch.zeros((64, 10), dtype=torch.float32)
+    tactical_influence = torch.zeros((64, 10), dtype=torch.float16)
     if sources:
         tactical_influence.index_add_(0, torch.tensor(targets), nodes_t[sources])
     
@@ -175,7 +175,7 @@ def generate_game_tensors(fen, moves_string):
 final_data = final_data.with_columns(
     all_tensor = pl.struct(["FEN", "Moves"]).map_elements(
         lambda x: generate_game_tensors(x["FEN"], x["Moves"]),
-        return_dtype=pl.List(pl.List(pl.List(pl.Float32)))
+        return_dtype=pl.List(pl.List(pl.List(pl.Float16)))
     )
 )
 

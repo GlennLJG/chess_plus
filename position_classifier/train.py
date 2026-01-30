@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import numpy as np
+from datetime import datetime
 from sklearn.metrics import f1_score
 
 # --- CONFIGURATION ---
@@ -75,45 +76,51 @@ def plot_training_results(history, loss_plot_path, config):
     plt.close(fig)
 
 def train_full_model(model, train_loader, val_loader, test_loader, epochs, learning_rate, model_save_path, loss_plot_path, pos_weight):
+    # --- INITIALISATION ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    use_cuda = device.type == 'cuda'
+    is_cuda = device.type == 'cuda'
     model.to(device)
 
     criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight).to(device))
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-2)
-    scaler = torch.amp.GradScaler('cuda', enabled=use_cuda)
+    
+    # On définit le scaler. Il sera inactif sur CPU (enabled=False)
+    scaler = torch.amp.GradScaler('cuda', enabled=is_cuda)
 
     best_f1 = 0
     history = {'t_loss': [], 'v_loss': [], 'v_acc': [], 'v_ham': [], 'v_f1': []}
-    # Early stopping params
-    early_stop_patience = 5  # nombre d'époques sans amélioration tolérées
+    early_stop_patience = 5
     best_val_loss = float('inf')
     epochs_no_improve = 0
 
-    print(f"🚀 Entraînement lancé sur : {device.type.upper()}")
+    print(f"🚀 Entraînement sur : {device.type.upper()}")
+    if not is_cuda:
+        print("💡 Note : Utilisation du Float32 natif (Optimisé pour Intel i7 13th Gen)")
 
     for epoch in range(epochs):
         # --- PHASE D'ENTRAÎNEMENT ---
         model.train()
         train_loss = 0
         for inputs, labels in train_loader:
-            inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True).float()
+            inputs = inputs.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True).float()
             
             optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast(device_type=device.type, enabled=use_cuda):
+            
+            # Autocast n'est activé QUE si on a un GPU. 
+            # Sur CPU, on reste en Float32 pour la vitesse.
+            with torch.amp.autocast(device_type=device.type, enabled=is_cuda):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
             
-            if use_cuda:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                optimizer.step()
+            # Scaler gère automatiquement CPU (simple backward) vs GPU (scaled backward)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            
             train_loss += loss.item()
         
-        avg_train_loss = train_loss / len(train_loader) # <-- Calcul de la Train Loss moyenne
+        avg_train_loss = train_loss / len(train_loader)
         
         # --- PHASE DE VALIDATION ---
         model.eval()
@@ -123,7 +130,8 @@ def train_full_model(model, train_loader, val_loader, test_loader, epochs, learn
         with torch.no_grad():
             for inputs, labels in val_loader:
                 inputs, labels = inputs.to(device), labels.to(device).float()
-                with torch.amp.autocast(device_type=device.type, enabled=use_cuda):
+                
+                with torch.amp.autocast(device_type=device.type, enabled=is_cuda):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
                 
@@ -132,46 +140,41 @@ def train_full_model(model, train_loader, val_loader, test_loader, epochs, learn
                 all_preds.append(preds.cpu().numpy())
                 all_labels.append(labels.cpu().numpy())
 
-        # Calcul des métriques globales
+        # --- MÉTRIQUES & LOGGING ---
         all_preds = np.vstack(all_preds)
         all_labels = np.vstack(all_labels)
         
         avg_val_loss = val_loss / len(val_loader)
-        exact_match = np.all(all_preds == all_labels, axis=1).mean() * 100
-        hamming = (all_preds == all_labels).mean() * 100
         f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+        hamming = (all_preds == all_labels).mean() * 100
+        
+        # Récupération de l'heure actuelle
+        heure_actuelle = datetime.now().strftime("%H:%M:%S")
 
-        # Archivage
-        history['t_loss'].append(avg_train_loss)
-        history['v_loss'].append(avg_val_loss)
-        history['v_acc'].append(exact_match)
-        history['v_ham'].append(hamming)
-        history['v_f1'].append(f1_macro)
+        # --- LE NOUVEAU PRINT ---
+        print(f"[{heure_actuelle}] Epoch {epoch+1:03d}/{epochs} | "
+              f"T-Loss: {avg_train_loss:.4f} | "
+              f"V-Loss: {avg_val_loss:.4f} | "
+              f"F1: {f1_macro:.3f} | "
+              f"Hamming: {hamming:.2f}%")
 
-        # --- LE PRINT QUE TU DEMANDAIS ---
-        print(f"Epoch [{epoch+1:03d}/{epochs}] "
-              f"| Train Loss: {avg_train_loss:.4f} "
-              f"| Val Loss: {avg_val_loss:.4f} "
-              f"| Hamming: {hamming:.1f}% "
-              f"| F1 Macro: {f1_macro:.3f}")
-
-        # Early stopping: surveille la stagnation de la val_loss
+        # --- SAUVEGARDE & EARLY STOPPING ---
+        if f1_macro > best_f1:
+            best_f1 = f1_macro
+            os.makedirs(model_save_path, exist_ok=True)
+            torch.save(model.state_dict(), f"{model_save_path}/best_model.pth")
+        
         if avg_val_loss < best_val_loss - 1e-4:
             best_val_loss = avg_val_loss
             epochs_no_improve = 0
         else:
             epochs_no_improve += 1
-            print(f"[EarlyStop] Pas d'amélioration val_loss depuis {epochs_no_improve} époque(s)")
+        
         if epochs_no_improve >= early_stop_patience:
-            print(f"⏹️ Early stopping déclenché après {epoch+1} époques (val_loss stagne)")
+            print("⏹️ Early stopping")
             break
 
-        # Sauvegarde du meilleur modèle sur le F1 Macro
-        if f1_macro > best_f1:
-            best_f1 = f1_macro
-            os.makedirs(model_save_path, exist_ok=True)
-            torch.save(model.state_dict(), f"{model_save_path}/best_model.pth")
-            print(f"⭐ Nouveau record F1 (Sauvegarde effectuée)")
+    print("🏁 Entraînement terminé.")
 
     # 1. Graphiques
     plot_training_results(history, loss_plot_path, config)
@@ -189,7 +192,7 @@ def train_full_model(model, train_loader, val_loader, test_loader, epochs, learn
     with torch.no_grad():
         for inputs, labels in test_loader:
             inputs, labels = inputs.to(device), labels.to(device).float()
-            with torch.amp.autocast(device_type=device.type, enabled=use_cuda):
+            with torch.amp.autocast(device_type=device.type, enabled=is_cuda):
                 outputs = model(inputs)
             preds = (torch.sigmoid(outputs) > 0.5).float()
             test_preds.append(preds.cpu().numpy())

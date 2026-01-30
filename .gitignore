@@ -1,5 +1,6 @@
 position_classifier/data/
 position_classifier/exploration_notebook.ipynb
 position_classifier/__pycache__/
+position_classifier/models/
 .venv/
 colab.ipynb
