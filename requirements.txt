@@ -5,3 +5,5 @@ seaborn
 torch
 scikit-learn
 scikit-multilearn
+h5py
+tqdm

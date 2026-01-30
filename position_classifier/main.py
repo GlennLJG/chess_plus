@@ -1,21 +1,17 @@
-import train 
+import train
+import sample_generator
 import dataset_config
 import model
-import json
 
 if __name__ == "__main__":
 
+    sample_generator.run_sampling_generation()
+
     # Récupération des DataLoaders depuis dataset_config
-    train_loader = dataset_config.train_loader
-    val_loader = dataset_config.val_loader
-    test_loader = dataset_config.test_loader
+    train_loader, val_loader, test_loader,output_size = dataset_config.prepare_data_and_loaders()
 
     # Initialisation du modèle
-    # Récupération du mapping thème-index depuis le fichier JSON
-    with open(dataset_config.index_path, "r") as f:
-        theme_to_index = json.load(f)
-    output_size = len(theme_to_index)  # Nombre de classes basé sur les thèmes uniques
-    model = model.ChessConvLSTMClassifier(input_channels=20, hidden_dim=model.hidden_dim, num_classes=output_size, dropout_rate=model.dropout_rate)
+    model_instance = model.ChessConvLSTMClassifier(input_channels=20, hidden_dim=model.hidden_dim, num_classes=output_size, dropout_rate=model.dropout_rate)
 
     # Entraînement du modèle
-    train.train_full_model(model, train_loader, val_loader, test_loader, train.epochs, train.learning_rate, train.model_save_path, train.loss_plot_path, train.pos_weight)
+    train.train_full_model(model_instance, train_loader, val_loader, test_loader)

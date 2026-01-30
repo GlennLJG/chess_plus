@@ -10,20 +10,7 @@ import numpy as np
 from datetime import datetime
 from sklearn.metrics import f1_score
 
-# --- CONFIGURATION ---
-config = configparser.ConfigParser()
-script_dir = os.path.dirname(os.path.abspath(__file__))
-config_path = os.path.join(script_dir, 'config.ini')
-config.read(config_path)
-
-epochs = config.getint('train', 'epochs')
-learning_rate = config.getfloat('train', 'learning_rate')
-model_save_path = config.get('train', 'model_save_path')
-loss_plot_path = config.get('train', 'loss_plot_path')
-pos_weight = config.getfloat('train', 'pos_weight')
-
-
-def plot_training_results(history, loss_plot_path, config):
+def plot_training_results(history, model_save_path, config):
     """Génère un diagnostic complet des performances avec légende des paramètres."""
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(21, 6))
 
@@ -56,26 +43,43 @@ def plot_training_results(history, loss_plot_path, config):
         f"epochs={config.getint('train', 'epochs')}, "
         f"lr={config.getfloat('train', 'learning_rate')}, "
         f"pos_weight={config.getfloat('train', 'pos_weight')}, "
-        f"batch_size={config.getint('dataset', 'batch_size') if config.has_option('dataset', 'batch_size') else 'N/A'}, "
-        f"sample_size={config.getint('preprocessing', 'sample_size') if config.has_option('preprocessing', 'sample_size') else 'N/A'}, "
-        f"dropout={config.getfloat('model', 'dropout_rate') if config.has_option('model', 'dropout_rate') else 'N/A'}, "
-        f"hidden_dim={config.getint('model', 'hidden_dim') if config.has_option('model', 'hidden_dim') else 'N/A'}"
+        f"batch_size={config.getint('preprocessing', 'batch_size')}, "
+        f"sample_size={config.getint('sampling', 'sample_size')}, "
+        f"dropout={config.getfloat('model', 'dropout_rate')}, "
+        f"hidden_dim={config.getint('model', 'hidden_dim')}"
     )
     fig.suptitle(f"Paramètres d'entraînement : {train_params}", fontsize=14, color='navy')
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
 
-    os.makedirs(loss_plot_path, exist_ok=True)
+    os.makedirs(model_save_path, exist_ok=True)
     # Cherche les fichiers existants
-    base_path = os.path.join(loss_plot_path, "training_report")
-    existing = glob.glob(base_path + "*.png")
-    idx = len(existing) + 1 if existing else 1
-    save_path = f"{base_path}_{idx}.png"
+    save_path = os.path.join(model_save_path, "training_report")
     plt.savefig(save_path)
     print(f"\n[INFO] Rapport graphique sauvegardé : {save_path}")
     plt.close(fig)
 
-def train_full_model(model, train_loader, val_loader, test_loader, epochs, learning_rate, model_save_path, loss_plot_path, pos_weight):
+def train_full_model(model, train_loader, val_loader, test_loader):
+    
+    config = configparser.ConfigParser()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.ini')
+    config.read(config_path)
+
+    epochs = config.getint('train', 'epochs')
+    learning_rate= config.getfloat('train', 'learning_rate')
+    model_save_path = config.get('train', 'model_save_path')
+    pos_weight = config.getfloat('train', 'pos_weight')
+    batch_size = config.getint('preprocessing', 'batch_size')
+    dropout_rate = config.getfloat('model', 'dropout_rate')
+    hidden_dim = config.getint('model', 'hidden_dim')
+    sample_size = config.getint('sampling', 'sample_size')
+    sample_threshold = config.getint('sampling', 'threshold_percentage')
+    puzzle_len = config.getint('sampling', 'puzzle_len')
+
+    model_dir_name = f"S{sample_size}_M{puzzle_len}_T{sample_threshold}__E{epochs}_L{learning_rate}_W{pos_weight}_B{batch_size}_D{dropout_rate}_H{hidden_dim}".replace('.', 'p')
+    model_save_path = os.path.join(model_save_path, model_dir_name)
+
     # --- INITIALISATION ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     is_cuda = device.type == 'cuda'
@@ -147,6 +151,13 @@ def train_full_model(model, train_loader, val_loader, test_loader, epochs, learn
         avg_val_loss = val_loss / len(val_loader)
         f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
         hamming = (all_preds == all_labels).mean() * 100
+        exact_match = np.all(all_preds == all_labels, axis=1).mean() * 100
+
+        history['t_loss'].append(avg_train_loss)
+        history['v_loss'].append(avg_val_loss)
+        history['v_f1'].append(f1_macro)
+        history['v_ham'].append(hamming)
+        history['v_acc'].append(exact_match)
         
         # Récupération de l'heure actuelle
         heure_actuelle = datetime.now().strftime("%H:%M:%S")
@@ -177,7 +188,7 @@ def train_full_model(model, train_loader, val_loader, test_loader, epochs, learn
     print("🏁 Entraînement terminé.")
 
     # 1. Graphiques
-    plot_training_results(history, loss_plot_path, config)
+    plot_training_results(history, model_save_path, config)
 
     # --- PHASE DE TEST FINAL ---
     print("\n" + "="*50)
