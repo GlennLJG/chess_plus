@@ -4,7 +4,7 @@ import dataset_config
 import model
 
 if __name__ == "__main__":
-
+    
     sample_generator.run_sampling_generation()
 
     # Récupération des DataLoaders depuis dataset_config
@@ -15,3 +15,4 @@ if __name__ == "__main__":
 
     # Entraînement du modèle
     train.train_full_model(model_instance, train_loader, val_loader, test_loader)
+    

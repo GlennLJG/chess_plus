@@ -1,4 +1,5 @@
 polars
+pandas
 chess
 matplotlib
 seaborn
