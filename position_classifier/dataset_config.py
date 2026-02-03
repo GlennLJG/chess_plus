@@ -197,7 +197,7 @@ def prepare_data_and_loaders():
     gc.collect()
 
     # 3. DataLoaders
-    train_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_train.flatten()), batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=chess_collate_fn)
+    train_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_train.flatten()), batch_size=batch_size, shuffle=True, num_workers=2, collate_fn=chess_collate_fn)
     val_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_val.flatten()), batch_size=batch_size, shuffle=False, num_workers=2, collate_fn=chess_collate_fn)
     test_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_test.flatten()), batch_size=batch_size, shuffle=False, num_workers=1, collate_fn=chess_collate_fn)
 
