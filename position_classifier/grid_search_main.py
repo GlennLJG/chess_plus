@@ -13,11 +13,11 @@ if __name__ == "__main__":
     param_grid = {
         "sample_size": [10000],
         "learning_rates": [0.001,0.0005,0.0001],
-        "batch_sizes": [64,256,512],
-        "hidden_dims": [32,64,128],
-        "puzzle_max_len": [6,8,10],
-        "pos_weight": [3.0,6.0,9.0],
-        "dropout_rates": [0.2, 0.3, 0.5]
+        "batch_sizes": [256],
+        "hidden_dims": [64,128],
+        "puzzle_max_len": [10],
+        "pos_weight": [3.0,8.0],
+        "dropout_rates": [0.2]
     }
     
     config = configparser.ConfigParser()
