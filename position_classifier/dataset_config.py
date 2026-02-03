@@ -196,10 +196,16 @@ def prepare_data_and_loaders():
     del y_all, y_temp
     gc.collect()
 
+    #vérifie le device disponible
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    pin = False
+    if device.type == 'cuda':
+        pin = True
+
     # 3. DataLoaders
-    train_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_train.flatten()), batch_size=batch_size, shuffle=True, num_workers=2, collate_fn=chess_collate_fn)
-    val_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_val.flatten()), batch_size=batch_size, shuffle=False, num_workers=2, collate_fn=chess_collate_fn)
-    test_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_test.flatten()), batch_size=batch_size, shuffle=False, num_workers=1, collate_fn=chess_collate_fn)
+    train_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_train.flatten()), batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=pin, collate_fn=chess_collate_fn)
+    val_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_val.flatten()), batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=pin, collate_fn=chess_collate_fn)
+    test_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_test.flatten()), batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=pin, collate_fn=chess_collate_fn)
 
     return train_loader, val_loader, test_loader,nb_themes
 

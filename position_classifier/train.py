@@ -281,12 +281,12 @@ def train_full_model(model, train_loader, val_loader, test_loader):
                 
                 val_loss += loss.item()
                 preds = (torch.sigmoid(outputs) > 0.5).float()
-                all_preds.append(preds.cpu().numpy())
-                all_labels.append(labels.cpu().numpy())
+                all_preds.append(preds)
+                all_labels.append(labels)
 
         # --- MÉTRIQUES & LOGGING ---
-        all_preds = np.vstack(all_preds)
-        all_labels = np.vstack(all_labels)
+        all_preds = torch.cat(all_preds).cpu().numpy()
+        all_labels = torch.cat(all_labels).cpu().numpy()
         
         avg_val_loss = val_loss / len(val_loader)
         f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
