@@ -169,7 +169,12 @@ def plot_trainings_history_df(model_save_path, report_indice):
     angles += angles[:1]
 
     for idx, row in df.iterrows():
-        values = [row['test_metrics'].get(k, 0) for k in test_metrics_keys]
+        values = []
+        for k in test_metrics_keys:
+            val = row['test_metrics'].get(k, 0)
+            if k == 'exact_match':
+                val = val / 100
+            values.append(val)
         values += values[:1]
         axes[5].plot(angles, values, color=colors[idx], linewidth=2, alpha=0.6)
         axes[5].fill(angles, values, alpha=0.05, color=colors[idx])
@@ -199,12 +204,13 @@ def plot_trainings_history_df(model_save_path, report_indice):
     print(f"[INFO] Rapport des entrainements généré sous {save_path}.")
 
 
-def train_full_model(model, train_loader, val_loader, test_loader):
+def train_full_model(model, train_loader, val_loader, test_loader,config=None):
     
-    config = configparser.ConfigParser()
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, 'config.ini')
-    config.read(config_path)
+    if config is None:
+        config = configparser.ConfigParser()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(script_dir, 'config.ini')
+        config.read(config_path)
 
     epochs = config.getint('train', 'epochs')
     learning_rate= config.getfloat('train', 'learning_rate')

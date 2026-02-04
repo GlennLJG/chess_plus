@@ -14,7 +14,7 @@ if __name__ == "__main__":
         "sample_size": [10000],
         "learning_rates": [0.001,0.0005,0.0001],
         "batch_sizes": [256],
-        "hidden_dims": [64,128],
+        "hidden_dims": [128],
         "puzzle_max_len": [10],
         "pos_weight": [3.0,8.0],
         "dropout_rates": [0.2]
@@ -58,7 +58,7 @@ if __name__ == "__main__":
             # Initialisation du modèle
             model_instance = model.ChessConvLSTMClassifier(input_channels=20, hidden_dim=model.hidden_dim, num_classes=output_size, dropout_rate=model.dropout_rate)
             # Entraînement du modèle
-            train.train_full_model(model_instance, train_loader, val_loader, test_loader)
+            train.train_full_model(model_instance, train_loader, val_loader, test_loader,config=config)
         
     finally:
         print("\n[INFO] Fin du grid search.")
