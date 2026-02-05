@@ -12,12 +12,13 @@ if __name__ == "__main__":
 
     param_grid = {
         "sample_size": [10000],
-        "learning_rates": [0.001,0.0005,0.0001],
-        "batch_sizes": [256],
-        "hidden_dims": [128],
-        "puzzle_max_len": [10],
-        "pos_weight": [3.0,8.0],
-        "dropout_rates": [0.2]
+        "learning_rate": [0.0001],
+        "batch_size": [256],
+        "hidden_dim": [64],
+        "puzzle_len": [10],
+        "pos_weight": [10.0,12.0,14.0],
+        "dropout_rate": [0.2],
+        "epochs": [25]
     }
     
     config = configparser.ConfigParser()
@@ -35,9 +36,11 @@ if __name__ == "__main__":
             for section in config.sections() 
             for option in config.options(section)
         }
+        print(param_to_section)
+
 
         for i, params in enumerate(ParameterGrid(param_grid)):
-            print(f"\n[INFO] Grid search n° {i+1}/{len(list(ParameterGrid(param_grid)))+1} : {params}")
+            print(f"\n[INFO] Grid search n° {i+1}/{len(list(ParameterGrid(param_grid)))} : {params}")
             # Lecture du fichier config.ini
             config = configparser.ConfigParser()
             config.read(config_path)
