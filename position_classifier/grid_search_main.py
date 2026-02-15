@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     param_grid = {
         "sample_size": [10000],
-        "learning_rate": [0.0001],
+        "learning_rate": [0.001],
         "batch_size": [256],
         "hidden_dim": [64],
         "puzzle_len": [10],

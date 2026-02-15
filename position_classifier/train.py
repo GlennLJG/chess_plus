@@ -5,6 +5,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -251,24 +252,29 @@ def train_full_model(model, train_loader, val_loader, test_loader,config=None):
         # --- PHASE D'ENTRAÎNEMENT ---
         model.train()
         train_loss = 0
-        for inputs, labels in train_loader:
+
+        # Initialisation de la barre de progression pour l'entraînement
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]", unit="batch")
+
+        for inputs, labels in pbar:
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True).float()
             
             optimizer.zero_grad(set_to_none=True)
             
-            # Autocast n'est activé QUE si on a un GPU. 
-            # Sur CPU, on reste en Float32 pour la vitesse.
             with torch.amp.autocast(device_type=device.type, enabled=is_cuda):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
             
-            # Scaler gère automatiquement CPU (simple backward) vs GPU (scaled backward)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
             
-            train_loss += loss.item()
+            current_loss = loss.item()
+            train_loss += current_loss
+            
+            # Mise à jour de la barre avec la perte actuelle
+            pbar.set_postfix(loss=f"{current_loss:.4f}")
         
         avg_train_loss = train_loss / len(train_loader)
         
@@ -277,8 +283,11 @@ def train_full_model(model, train_loader, val_loader, test_loader,config=None):
         val_loss = 0
         all_preds, all_labels = [], []
         
+        # Barre de progression pour la validation (optionnelle, mise en 'leave=False' pour rester propre)
+        pbar_val = tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]", unit="batch", leave=False)
+        
         with torch.no_grad():
-            for inputs, labels in val_loader:
+            for inputs, labels in pbar_val:
                 inputs, labels = inputs.to(device), labels.to(device).float()
                 
                 with torch.amp.autocast(device_type=device.type, enabled=is_cuda):
