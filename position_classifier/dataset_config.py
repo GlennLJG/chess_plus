@@ -160,6 +160,8 @@ def prepare_data_and_loaders():
     val_split = config.getfloat('preprocessing', 'val_split')
     test_split = config.getfloat('preprocessing', 'test_split')
     batch_size = config.getint('preprocessing', 'batch_size')
+    train_workers = config.getint('preprocessing', 'train_workers')
+    val_workers = config.getint('preprocessing', 'val_workers')
 
     if sample_size == -1:
          # Cas où tu as fait un export FULL (à adapter selon ton nom de fichier)
@@ -203,8 +205,8 @@ def prepare_data_and_loaders():
         pin = True
 
     # 3. DataLoaders
-    train_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_train.flatten()), batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=pin, collate_fn=chess_collate_fn)
-    val_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_val.flatten()), batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=pin, collate_fn=chess_collate_fn)
+    train_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_train.flatten()), batch_size=batch_size, shuffle=True, num_workers=train_workers, pin_memory=pin, collate_fn=chess_collate_fn)
+    val_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_val.flatten()), batch_size=batch_size, shuffle=False, num_workers=val_workers, pin_memory=pin, collate_fn=chess_collate_fn)
     test_loader = DataLoader(ChessHDF5Dataset(h5_path, idx_test.flatten()), batch_size=batch_size, shuffle=False, num_workers=1, pin_memory=pin, collate_fn=chess_collate_fn)
 
     return train_loader, val_loader, test_loader,nb_themes

@@ -246,8 +246,10 @@ def train_full_model(model, train_loader, val_loader, test_loader,config=None):
 
     print(f"🚀 Entraînement sur : {device.type.upper()}")
     if not is_cuda:
-        print("💡 Note : Utilisation du Float32 natif (Optimisé pour Intel i7 13th Gen)")
-
+        print("💡 Optimisation CPU activée avec torch.compile")
+        # Ajout de cette ligne
+        model = torch.compile(model)
+        
     for epoch in range(epochs):
         # --- PHASE D'ENTRAÎNEMENT ---
         model.train()
